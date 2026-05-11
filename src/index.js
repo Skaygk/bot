@@ -31,11 +31,12 @@ const LAVALINK_NODES = [
 ];
 
 const SHOUKAKU_OPTIONS = {
-  moveOnDisconnect:  false,
-  resumable:         false,
-  resumableTimeout:  30,
-  reconnectTries:    3,
-  restTimeout:       10000,
+  moveOnDisconnect:        false,
+  resumable:               false,
+  resumableTimeout:        30,
+  reconnectTries:          3,
+  restTimeout:             10000,
+  voiceConnectionTimeout:  30000, // 30s para establecer conexion de voz (default 15s)
 };
 
 // ─── Cliente Discord ─────────────────────────────────────────────────────────
