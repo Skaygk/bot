@@ -48,6 +48,9 @@ async function searchAndGetUrl(query) {
       '--no-playlist',
       '--no-warnings',
       '--no-check-certificates',
+      '-f', 'bestaudio/best',
+      '--audio-quality', '0',
+      '--extractor-retries', '3',
     ];
 
     if (fs.existsSync(COOKIES_PATH)) {
