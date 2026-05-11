@@ -3,25 +3,30 @@ const { Client, GatewayIntentBits, Partials, Collection } = require('discord.js'
 const { Shoukaku, Connectors } = require('shoukaku');
 
 // ─── Nodos Lavalink públicos ─────────────────────────────────────────────────
-// Si alguno falla, Shoukaku hace failover automático al siguiente.
-// Lista actualizada: https://lavalink.darrennathanael.com/NoSSL/lavalink-without-ssl/
+// Lista verificada — actualiza desde: https://lavainfo.netlify.app/
 const LAVALINK_NODES = [
   {
-    name: 'node-1',
-    url: 'lavalink.jiveoff.fr:2333',
+    name: 'nexcloud',
+    url: 'n3.nexcloud.in:2026',
+    auth: 'nexcloud',
+    secure: false,
+  },
+  {
+    name: 'jirayu',
+    url: 'lavalink.jirayu.net:13592',
     auth: 'youshallnotpass',
     secure: false,
   },
   {
-    name: 'node-2',
-    url: 'lava.link:80',
-    auth: 'dismusic',
+    name: 'serenetia',
+    url: 'lavalinkv4.serenetia.com:80',
+    auth: 'https://dsc.gg/ajidevserver',
     secure: false,
   },
   {
-    name: 'node-3',
-    url: 'lavalink.clxud.dev:2333',
-    auth: 'youshallnotpass',
+    name: 'vexanode',
+    url: 'omega.vexanode.cloud:2031',
+    auth: 'https://discord.vexanode.cloud',
     secure: false,
   },
 ];
