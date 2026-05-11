@@ -9,31 +9,6 @@ const {
 const { EmbedBuilder } = require('discord.js');
 const playdl = require('play-dl');
 
-// ─── Autenticacion con cookies de YouTube ───────────────────────────────────
-(async () => {
-  if (process.env.YOUTUBE_COOKIES) {
-    try {
-      // Limpiar cookies: eliminar saltos de linea, tabs y caracteres invalidos
-      const rawCookie = process.env.YOUTUBE_COOKIES
-        .replace(/\r?\n/g, ' ')   // saltos de linea → espacio
-        .replace(/\t/g, ' ')      // tabs → espacio
-        .replace(/\s+/g, ' ')     // espacios multiples → uno solo
-        .trim();
-
-      await playdl.setToken({
-        youtube: {
-          cookie: rawCookie,
-        },
-      });
-      console.log('[play-dl] Cookies configuradas correctamente.');
-    } catch (e) {
-      console.warn('[play-dl] Error al configurar cookies:', e.message);
-    }
-  } else {
-    console.warn('[play-dl] No se encontro YOUTUBE_COOKIES.');
-  }
-})();
-
 // ─── Helpers ────────────────────────────────────────────────────────────────
 function getQueue(client, guildId) {
   if (!client.musicQueues.has(guildId)) {
@@ -44,6 +19,25 @@ function getQueue(client, guildId) {
     });
   }
   return client.musicQueues.get(guildId);
+}
+
+// ─── Buscar en SoundCloud (no bloquea IPs de datacenter) ────────────────────
+async function searchSoundCloud(query) {
+  const isUrl = query.startsWith('http');
+
+  if (isUrl) {
+    const info = await playdl.soundcloud(query);
+    return { title: info.name, url: info.url };
+  }
+
+  const results = await playdl.search(query, {
+    source: { soundcloud: 'tracks' },
+    limit: 1,
+  });
+
+  if (!results || results.length === 0) throw new Error('Sin resultados');
+
+  return { title: results[0].name, url: results[0].url };
 }
 
 // ─── Comandos ────────────────────────────────────────────────────────────────
@@ -111,29 +105,12 @@ async function play(client, message, content) {
   const loadingMsg = await message.channel.send('Buscando cancion...');
 
   try {
-    let videoUrl;
-    let title;
-
-    const isUrl = query.startsWith('http');
-
-    if (isUrl) {
-      const info = await playdl.video_info(query);
-      title = info.video_details.title;
-      videoUrl = query;
-    } else {
-      const results = await playdl.search(query, { limit: 1 });
-      if (!results || results.length === 0) {
-        await loadingMsg.delete().catch(() => {});
-        return message.channel.send('No encontre resultados para esa busqueda.');
-      }
-      title = results[0].title;
-      videoUrl = results[0].url;
-    }
+    const { title, url } = await searchSoundCloud(query);
 
     console.log('[play] Titulo:', title);
-    console.log('[play] URL:', videoUrl);
+    console.log('[play] URL:', url);
 
-    const stream = await playdl.stream(videoUrl, { quality: 2 });
+    const stream = await playdl.stream(url);
 
     const resource = createAudioResource(stream.stream, {
       inputType: stream.type,
