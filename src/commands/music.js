@@ -23,12 +23,12 @@ function getQueue(client, guildId) {
 
 async function join(client, message) {
   const voiceChannel = message.member.voice.channel;
-  if (!voiceChannel) return message.channel.send('❌ Debes estar en un canal de voz.');
+  if (!voiceChannel) return message.channel.send('Debes estar en un canal de voz.');
 
   const queue = getQueue(client, message.guild.id);
 
   if (queue.connection) {
-    return message.channel.send('✅ Ya estoy en un canal de voz.');
+    return message.channel.send('Ya estoy en un canal de voz.');
   }
 
   const connection = joinVoiceChannel({
@@ -51,15 +51,15 @@ async function join(client, message) {
     }
   });
 
-  message.channel.send(`✅ Me uní a **${voiceChannel.name}**.`);
+  message.channel.send(` Me uní a **${voiceChannel.name}**.`);
 }
 
 async function play(client, message, content) {
   const voiceChannel = message.member.voice.channel;
-  if (!voiceChannel) return message.channel.send('❌ Debes estar en un canal de voz.');
+  if (!voiceChannel) return message.channel.send(' Debes estar en un canal de voz.');
 
   const query = content.replace(/^play\s+/i, '').trim();
-  if (!query) return message.channel.send('❌ Especifica una canción. Uso: `,play <nombre o URL>`');
+  if (!query) return message.channel.send(' Especifica una canción. Uso: `,play <nombre o URL>`');
 
   const queue = getQueue(client, message.guild.id);
 
@@ -78,7 +78,7 @@ async function play(client, message, content) {
   if (!ytdl.validateURL(query)) {
     const results = await yts(query);
     const video = results.videos[0];
-    if (!video) return message.channel.send('❌ No encontré ninguna canción con ese nombre.');
+    if (!video) return message.channel.send(' No encontré ninguna canción con ese nombre.');
     url = video.url;
     songTitle = video.title;
   } else {
@@ -124,14 +124,14 @@ async function play(client, message, content) {
 
   } catch (err) {
     console.error(err);
-    message.channel.send('❌ No pude reproducir esa canción.');
+    message.channel.send(' No pude reproducir esa canción.');
   }
 }
 
 async function pause(client, message) {
   const queue = getQueue(client, message.guild.id);
   if (!queue.player || !queue.playing) {
-    return message.channel.send('❌ No hay nada reproduciéndose.');
+    return message.channel.send(' No hay nada reproduciéndose.');
   }
   queue.player.pause();
   message.channel.send('⏸ Música pausada.');
@@ -140,10 +140,10 @@ async function pause(client, message) {
 async function resume(client, message) {
   const queue = getQueue(client, message.guild.id);
   if (!queue.player) {
-    return message.channel.send('❌ No hay nada en cola.');
+    return message.channel.send(' No hay nada en cola.');
   }
   queue.player.unpause();
-  message.channel.send('▶️ Música reanudada.');
+  message.channel.send('Música reanudada.');
 }
 
 module.exports = { join, play, pause, resume };
