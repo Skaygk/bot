@@ -7,7 +7,7 @@ const {
   entersState,
 } = require('@discordjs/voice');
 const { EmbedBuilder } = require('discord.js');
-const { spawn } = require('child_process');
+const { spawn, execSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const ffmpegStatic = require('ffmpeg-static');
@@ -36,7 +36,6 @@ async function getYtDlp() {
   return ytDlp;
 }
 
-// Descarga el binario al arrancar
 getYtDlp();
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -52,25 +51,41 @@ function getQueue(client, guildId) {
 }
 
 async function searchAndGetUrl(query) {
-  const yt = await getYtDlp();
   const isUrl = query.startsWith('http');
   const target = isUrl ? query : `ytsearch1:${query}`;
 
-  const output = await yt.execPromise([
-    target,
-    '-f', 'bestaudio',
-    '--get-url',
-    '--get-title',
-    '--no-playlist',
-    '--no-warnings',
-  ]);
+  // Usamos exec directo con node para evitar dependencia de python
+  return new Promise((resolve, reject) => {
+    const proc = spawn(YTDLP_PATH, [
+      target,
+      '-f', 'bestaudio',
+      '--get-url',
+      '--get-title',
+      '--no-playlist',
+      '--no-warnings',
+      '--extractor-args', 'youtube:skip=dash',
+    ]);
 
-  const lines = output.trim().split('\n').filter(Boolean);
-  if (lines.length < 2) throw new Error('No results found');
+    let stdout = '';
+    let stderr = '';
 
-  const title = lines[0];
-  const url = lines[lines.length - 1];
-  return { title, url };
+    proc.stdout.on('data', (d) => { stdout += d.toString(); });
+    proc.stderr.on('data', (d) => { stderr += d.toString(); });
+
+    proc.on('close', (code) => {
+      if (code !== 0) {
+        console.error('[yt-dlp stderr]', stderr);
+        return reject(new Error('yt-dlp fallo: ' + stderr));
+      }
+      const lines = stdout.trim().split('\n').filter(Boolean);
+      if (lines.length < 2) return reject(new Error('No results found'));
+      const title = lines[0];
+      const url = lines[lines.length - 1];
+      resolve({ title, url });
+    });
+
+    proc.on('error', reject);
+  });
 }
 
 function getStream(url) {
@@ -89,12 +104,10 @@ function getStream(url) {
     ];
 
     const proc = spawn(ffmpegStatic, args);
-
     proc.on('error', (err) => {
       console.error('[ffmpeg] Error:', err);
       reject(err);
     });
-
     resolve(proc.stdout);
   });
 }
@@ -103,7 +116,7 @@ function getStream(url) {
 
 async function join(client, message) {
   const voiceChannel = message.member?.voice?.channel;
-  if (!voiceChannel) return message.channel.send('No estás en un canal de voz.');
+  if (!voiceChannel) return message.channel.send('No estas en un canal de voz.');
 
   const queue = getQueue(client, message.guild.id);
   if (queue.connection) return message.channel.send('Ya estoy en un canal de voz.');
@@ -128,15 +141,15 @@ async function join(client, message) {
     }
   });
 
-  message.channel.send(`Me uní a **${voiceChannel.name}**.`);
+  message.channel.send(`Me uni a **${voiceChannel.name}**.`);
 }
 
 async function play(client, message, content) {
   const voiceChannel = message.member?.voice?.channel;
-  if (!voiceChannel) return message.channel.send('No estás en un canal de voz.');
+  if (!voiceChannel) return message.channel.send('No estas en un canal de voz.');
 
   const query = content.replace(/^play\s+/i, '').trim();
-  if (!query) return message.channel.send('Especifica una canción. Uso: `,play <nombre o URL>`');
+  if (!query) return message.channel.send('Especifica una cancion. Uso: `,play <nombre o URL>`');
 
   const queue = getQueue(client, message.guild.id);
 
@@ -161,7 +174,7 @@ async function play(client, message, content) {
     });
   }
 
-  const loadingMsg = await message.channel.send('Buscando canción...');
+  const loadingMsg = await message.channel.send('Buscando cancion...');
 
   try {
     const { title, url } = await searchAndGetUrl(query);
@@ -199,18 +212,18 @@ async function play(client, message, content) {
   } catch (err) {
     console.error('[play] Error:', err);
     await loadingMsg.delete().catch(() => {});
-    message.channel.send('No pude reproducir esa canción. Intenta con otro link o nombre.');
+    message.channel.send('No pude reproducir esa cancion. Intenta con otro link o nombre.');
   }
 }
 
 async function pause(client, message) {
   const queue = getQueue(client, message.guild.id);
   if (!queue.player || queue.player.state.status !== AudioPlayerStatus.Playing) {
-    return message.channel.send('No hay nada reproduciéndose.');
+    return message.channel.send('No hay nada reproduciendose.');
   }
   queue.player.pause();
   queue.playing = false;
-  message.channel.send('Canción pausada.');
+  message.channel.send('Cancion pausada.');
 }
 
 async function resume(client, message) {
@@ -220,12 +233,12 @@ async function resume(client, message) {
   }
   queue.player.unpause();
   queue.playing = true;
-  message.channel.send('Canción reanudada.');
+  message.channel.send('Cancion reanudada.');
 }
 
 async function stop(client, message) {
   const queue = getQueue(client, message.guild.id);
-  if (!queue.player) return message.channel.send('No hay nada reproduciéndose.');
+  if (!queue.player) return message.channel.send('No hay nada reproduciendose.');
 
   queue.player.stop();
   queue.playing = false;
@@ -233,7 +246,7 @@ async function stop(client, message) {
   if (queue.connection) queue.connection.destroy();
 
   client.musicQueues.delete(message.guild.id);
-  message.channel.send('Reproducción detenida y salí del canal.');
+  message.channel.send('Reproduccion detenida.');
 }
 
 module.exports = { join, play, pause, resume, stop };
