@@ -200,7 +200,9 @@ async function play(client, message, content) {
     message.channel.send({ embeds: [embed] });
 
   } catch (err) {
-    console.error('[play] Error:', err);
+    console.error('[play] Error completo:', err.message);
+    console.error('[play] Stack:', err.stack);
+    
     await loadingMsg.delete().catch(() => {});
     message.channel.send('No pude reproducir esa cancion. Intenta con otro link o nombre.');
   }
