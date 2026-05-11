@@ -3,40 +3,39 @@ const { Client, GatewayIntentBits, Partials, Collection } = require('discord.js'
 const { Shoukaku, Connectors } = require('shoukaku');
 
 // ─── Nodos Lavalink públicos ─────────────────────────────────────────────────
-// Lista verificada — actualiza desde: https://lavainfo.netlify.app/
 const LAVALINK_NODES = [
   {
     name: 'nexcloud',
-    url: 'n3.nexcloud.in:2026',
+    url:  'n3.nexcloud.in:2026',
     auth: 'nexcloud',
     secure: false,
   },
   {
     name: 'jirayu',
-    url: 'lavalink.jirayu.net:13592',
+    url:  'lavalink.jirayu.net:13592',
     auth: 'youshallnotpass',
     secure: false,
   },
   {
     name: 'serenetia',
-    url: 'lavalinkv4.serenetia.com:80',
+    url:  'lavalinkv4.serenetia.com:80',
     auth: 'https://dsc.gg/ajidevserver',
     secure: false,
   },
   {
     name: 'vexanode',
-    url: 'omega.vexanode.cloud:2031',
+    url:  'omega.vexanode.cloud:2031',
     auth: 'https://discord.vexanode.cloud',
     secure: false,
   },
 ];
 
 const SHOUKAKU_OPTIONS = {
-  moveOnDisconnect: false,
-  resumable: false,
-  resumableTimeout: 30,
-  reconnectTries: 3,
-  restTimeout: 10000,
+  moveOnDisconnect:  false,
+  resumable:         false,
+  resumableTimeout:  30,
+  reconnectTries:    3,
+  restTimeout:       10000,
 };
 
 // ─── Cliente Discord ─────────────────────────────────────────────────────────
@@ -75,8 +74,9 @@ client.shoukaku.on('disconnect', (name, count) => {
 });
 
 // ─── Handlers ────────────────────────────────────────────────────────────────
-const { handleCommand } = require('./handler');
+const { handleCommand }      = require('./handler');
 const { handleMemberUpdate } = require('./events/memberUpdate');
+const { handleVoiceStateUpdate } = require('./commands/music');
 
 client.on('ready', () => {
   console.log(`Bot online como ${client.user.tag}`);
@@ -89,6 +89,11 @@ client.on('messageCreate', async (message) => {
 
 client.on('guildMemberUpdate', async (oldMember, newMember) => {
   await handleMemberUpdate(client, oldMember, newMember);
+});
+
+// Detectar VC vacío → salir en 1 minuto
+client.on('voiceStateUpdate', (oldState, newState) => {
+  handleVoiceStateUpdate(client, oldState, newState);
 });
 
 client.login(process.env.DISCORD_TOKEN);
