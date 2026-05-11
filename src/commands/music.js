@@ -127,12 +127,20 @@ async function destroyQueue(client, guildId) {
   clearInactivityTimer(guildId);
   clearEmptyChannelTimer(guildId);
   const queue = client.musicQueues.get(guildId);
-  if (!queue) return;
-  if (queue.player) {
+  if (queue?.player) {
     try { await queue.player.stopTrack(); } catch (_) {}
-    try { await client.shoukaku.leaveVoiceChannel(guildId); } catch (_) {}
   }
+  // Siempre intentar salir del VC en Shoukaku, aunque no tengamos queue local
+  try { await client.shoukaku.leaveVoiceChannel(guildId); } catch (_) {}
   client.musicQueues.delete(guildId);
+}
+
+// ─── Limpiar cualquier conexión residual de Shoukaku para una guild ───────────
+async function forceCleanup(client, guildId) {
+  clearInactivityTimer(guildId);
+  clearEmptyChannelTimer(guildId);
+  client.musicQueues.delete(guildId);
+  try { await client.shoukaku.leaveVoiceChannel(guildId); } catch (_) {}
 }
 
 // ─── Reproducir siguiente track ───────────────────────────────────────────────
@@ -150,6 +158,9 @@ async function playNext(client, guildId, _retryItem) {
     return;
   }
 
+  // Cancelar timer de inactividad en cuanto hay algo para reproducir
+  clearInactivityTimer(guildId);
+
   const title    = item.track.info?.title  ?? 'Desconocido';
   const author   = item.track.info?.author ?? '';
   const uri      = item.track.info?.uri    ?? '';
@@ -161,7 +172,6 @@ async function playNext(client, guildId, _retryItem) {
     queue.playing      = true;
     queue.currentTrack = item.track;
     queue.requestedBy  = item.requestedBy;
-    clearInactivityTimer(guildId);
 
     const embed = new EmbedBuilder()
       .setColor(0x1db954)
@@ -184,6 +194,9 @@ async function createPlayer(client, guildId, voiceChannelId, shardId, textChanne
   queue.textChannel = textChannel;
 
   console.log(`[createPlayer] Conectando a canal ${voiceChannelId} en guild ${guildId}`);
+
+  // Limpiar cualquier conexión residual antes de crear una nueva
+  try { await client.shoukaku.leaveVoiceChannel(guildId); } catch (_) {}
 
   const player = await client.shoukaku.joinVoiceChannel({
     guildId,
@@ -311,11 +324,12 @@ async function join(client, message) {
   }
 
   try {
+    await forceCleanup(client, message.guild.id);
     await createPlayer(client, message.guild.id, voiceChannel.id, message.guild.shardId, message.channel);
     message.channel.send(`Me uni a **${voiceChannel.name}**.`);
-    startInactivityTimer(client, message.guild.id);
   } catch (err) {
     console.error('[join] Error:', err.message);
+    await forceCleanup(client, message.guild.id);
     message.channel.send(`No pude unirme: ${err.message}`);
   }
 }
@@ -331,16 +345,34 @@ async function play(client, message, content) {
   let queue = client.musicQueues.get(message.guild.id);
 
   if (!queue?.player) {
+    // Limpiar cualquier conexión residual de Shoukaku antes de intentar unirse
+    await forceCleanup(client, message.guild.id);
     try {
       await createPlayer(client, message.guild.id, voiceChannel.id, message.guild.shardId, message.channel);
       queue = client.musicQueues.get(message.guild.id);
     } catch (err) {
       console.error('[play] Error al unirse:', err.message);
+      // Si falla, limpiar de nuevo para no dejar estado corrupto
+      await forceCleanup(client, message.guild.id);
       return message.channel.send(`No pude unirme al canal: ${err.message}`);
     }
   } else {
-    // Actualizar canal de texto por si cambió
-    queue.textChannel = message.channel;
+    // Verificar que el bot realmente está en un VC; si no, limpiar y reconectar
+    const botInVc = message.guild.members.me?.voice?.channelId;
+    if (!botInVc) {
+      console.warn('[play] Queue existe pero bot no esta en VC, limpiando y reconectando...');
+      await forceCleanup(client, message.guild.id);
+      try {
+        await createPlayer(client, message.guild.id, voiceChannel.id, message.guild.shardId, message.channel);
+        queue = client.musicQueues.get(message.guild.id);
+      } catch (err) {
+        console.error('[play] Error al reconectar:', err.message);
+        await forceCleanup(client, message.guild.id);
+        return message.channel.send(`No pude unirme al canal: ${err.message}`);
+      }
+    } else {
+      queue.textChannel = message.channel;
+    }
   }
 
   const loadingMsg = await message.channel.send('Buscando cancion...');
