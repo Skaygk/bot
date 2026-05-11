@@ -9,6 +9,14 @@ const {
 const playdl = require('play-dl');
 const { EmbedBuilder } = require('discord.js');
 
+if (process.env.YOUTUBE_COOKIE) {
+  playdl.setToken({
+    youtube: {
+      cookie: process.env.YOUTUBE_COOKIE,
+    },
+  });
+}
+
 function getQueue(client, guildId) {
   if (!client.musicQueues.has(guildId)) {
     client.musicQueues.set(guildId, {
@@ -22,7 +30,7 @@ function getQueue(client, guildId) {
 
 async function join(client, message) {
   const voiceChannel = message.member.voice.channel;
-  if (!voiceChannel) return message.channel.send('Debes estar en un canal de voz.');
+  if (!voiceChannel) return message.channel.send('No estas en un canal de voz.');
 
   const queue = getQueue(client, message.guild.id);
 
@@ -50,15 +58,15 @@ async function join(client, message) {
     }
   });
 
-  message.channel.send(`Me uní a **${voiceChannel.name}**.`);
+  message.channel.send(`Me uni a **${voiceChannel.name}**.`);
 }
 
 async function play(client, message, content) {
   const voiceChannel = message.member.voice.channel;
-  if (!voiceChannel) return message.channel.send('Debes estar en un vc');
+  if (!voiceChannel) return message.channel.send('No estas en un canal de voz :p');
 
   const query = content.replace(/^play\s+/i, '').trim();
-  if (!query) return message.channel.send('Especifica una canción. asi: `,play <nombre o URL>`');
+  if (!query) return message.channel.send('Especifica una cancion. Uso: `,play <nombre o URL>`');
 
   const queue = getQueue(client, message.guild.id);
 
@@ -84,7 +92,7 @@ async function play(client, message, content) {
     } else {
       const results = await playdl.search(query, { limit: 1 });
       if (!results || results.length === 0) {
-        return message.channel.send('ulu no encontro esa cancion');
+        return message.channel.send('ulu no la encontro');
       }
       url = results[0].url;
       songTitle = results[0].title;
@@ -118,7 +126,7 @@ async function play(client, message, content) {
 
     const embed = new EmbedBuilder()
       .setColor(0x1db954)
-      .setTitle('🎵 Reproduciendo')
+      .setTitle('Reproduciendo')
       .setDescription(`**${songTitle}**`)
       .setFooter({ text: `Solicitado por ${message.author.tag}` })
       .setTimestamp();
@@ -127,14 +135,14 @@ async function play(client, message, content) {
 
   } catch (err) {
     console.error('Play error:', err);
-    message.channel.send('No pude reproducir esa canción. Intenta con otro link o nombre.');
+    message.channel.send('No pude reproducir esa cancion. Intenta con otro link o nombre.');
   }
 }
 
 async function pause(client, message) {
   const queue = getQueue(client, message.guild.id);
   if (!queue.player || queue.player.state.status !== AudioPlayerStatus.Playing) {
-    return message.channel.send('no hay nada reproduciéndose.');
+    return message.channel.send('No hay nada reproduciendose.');
   }
   queue.player.pause();
   queue.playing = false;
@@ -148,7 +156,7 @@ async function resume(client, message) {
   }
   queue.player.unpause();
   queue.playing = true;
-  message.channel.send('continuando.');
+  message.channel.send('reanudada.');
 }
 
 module.exports = { join, play, pause, resume };
