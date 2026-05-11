@@ -41,15 +41,14 @@ async function searchAndGetUrl(query) {
   const target = isUrl ? query : `ytsearch1:${query}`;
 
   return new Promise((resolve, reject) => {
-    const args = [
-      target,
-      '-f', 'bestaudio/best',
-      '--get-url',
-      '--get-title',
-      '--no-playlist',
-      '--no-warnings',
-      '--extractor-args', 'youtube:skip=dash',
-    ];
+  const args = [
+  target,
+  '-f', 'bestaudio/best',
+  '--get-url',
+  '--get-title',
+  '--no-playlist',
+  '--no-warnings',
+];
 
     if (fs.existsSync(COOKIES_PATH)) {
       args.push('--cookies', COOKIES_PATH);
