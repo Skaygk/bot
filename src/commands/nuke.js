@@ -4,7 +4,7 @@ async function nuke(client, message) {
 
   // Check bot permissions
   if (!guild.members.me.permissions.has('ManageChannels')) {
-    return message.channel.send('No tengo permisos para gestionar canales.');
+    return message.channel.send('No tengo permisos para los canales');
   }
 
   // Save everything we need to recreate the channel
