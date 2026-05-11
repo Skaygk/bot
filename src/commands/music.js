@@ -35,7 +35,7 @@ async function join(client, message) {
   const queue = getQueue(client, message.guild.id);
 
   if (queue.connection) {
-    return message.channel.send('Ya estoy en un canal de voz.');
+    return message.channel.send('ulu ya esta en un canal de voz.');
   }
 
   const connection = joinVoiceChannel({
@@ -63,7 +63,7 @@ async function join(client, message) {
 
 async function play(client, message, content) {
   const voiceChannel = message.member.voice.channel;
-  if (!voiceChannel) return message.channel.send('No estas en un canal de voz :p');
+  if (!voiceChannel) return message.channel.send('No estas en un canal de voz.');
 
   const query = content.replace(/^play\s+/i, '').trim();
   if (!query) return message.channel.send('Especifica una cancion. Uso: `,play <nombre o URL>`');
@@ -85,16 +85,17 @@ async function play(client, message, content) {
 
     const urlCheck = await playdl.validate(query);
 
-    if (urlCheck && urlCheck !== 'search') {
+    if (urlCheck === 'yt_video') {
       const info = await playdl.video_info(query);
       url = query;
       songTitle = info.video_details.title;
     } else {
       const results = await playdl.search(query, { limit: 1 });
       if (!results || results.length === 0) {
-        return message.channel.send('ulu no la encontro');
+        return message.channel.send('ulu no encontro ninguna cancion con ese nombre.');
       }
-      url = results[0].url;
+      const videoId = results[0].id;
+      url = `https://www.youtube.com/watch?v=${videoId}`;
       songTitle = results[0].title;
     }
 
