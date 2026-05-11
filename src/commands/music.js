@@ -35,7 +35,7 @@ async function join(client, message) {
   const queue = getQueue(client, message.guild.id);
 
   if (queue.connection) {
-    return message.channel.send('ulu ya esta en un canal de voz.');
+    return message.channel.send('Ya estoy en un canal de voz.');
   }
 
   const connection = joinVoiceChannel({
@@ -92,12 +92,16 @@ async function play(client, message, content) {
     } else {
       const results = await playdl.search(query, { limit: 1 });
       if (!results || results.length === 0) {
-        return message.channel.send('ulu no encontro ninguna cancion con ese nombre.');
+        return message.channel.send('No encontre ninguna cancion con ese nombre.');
       }
+      console.log('Search result:', JSON.stringify(results[0], null, 2));
       const videoId = results[0].id;
+      console.log('Video ID:', videoId);
       url = `https://www.youtube.com/watch?v=${videoId}`;
       songTitle = results[0].title;
     }
+
+    console.log('Final URL:', url);
 
     const stream = await playdl.stream(url, { quality: 2 });
 
@@ -147,7 +151,7 @@ async function pause(client, message) {
   }
   queue.player.pause();
   queue.playing = false;
-  message.channel.send('pausada.');
+  message.channel.send('Musica pausada.');
 }
 
 async function resume(client, message) {
@@ -157,7 +161,7 @@ async function resume(client, message) {
   }
   queue.player.unpause();
   queue.playing = true;
-  message.channel.send('reanudada.');
+  message.channel.send('Musica reanudada.');
 }
 
 module.exports = { join, play, pause, resume };
