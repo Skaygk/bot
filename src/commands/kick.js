@@ -3,17 +3,17 @@ const { EmbedBuilder } = require('discord.js');
 // ,kick @user [razon]
 async function kick(client, message, content) {
   if (!message.member.permissions.has('KickMembers')) {
-    return message.channel.send('❌ No tienes permisos para kickear.');
+    return message.channel.send('No tienes permisos para kickear.');
   }
   if (!message.guild.members.me.permissions.has('KickMembers')) {
-    return message.channel.send('❌ No tengo permisos para kickear.');
+    return message.channel.send('No tengo permisos para kickear.');
   }
 
   const target = message.mentions.members.first();
-  if (!target) return message.channel.send('❌ Menciona un usuario. Uso: `,kick @usuario [razón]`');
+  if (!target) return message.channel.send('Menciona un usuario. Uso: `,kick @usuario [razón]`');
 
   if (!target.kickable) {
-    return message.channel.send('❌ No puedo kickear a ese usuario (puede tener un rol más alto que yo).');
+    return message.channel.send('No puedo kickear a ese usuario (puede tener un rol más alto que yo).');
   }
 
   const args = content.split(' ').slice(1);
@@ -24,7 +24,7 @@ async function kick(client, message, content) {
 
     const embed = new EmbedBuilder()
       .setColor(0xff8800)
-      .setTitle('👢 Usuario kickeado')
+      .setTitle('Usuario kickeado')
       .addFields(
         { name: 'Usuario', value: `${target.user.tag} (${target.id})`, inline: true },
         { name: 'Por', value: message.author.tag, inline: true },
@@ -34,7 +34,7 @@ async function kick(client, message, content) {
 
     message.channel.send({ embeds: [embed] });
   } catch (err) {
-    message.channel.send('❌ No pude kickear a ese usuario.');
+    message.channel.send('No pude kickear a ese usuario.');
   }
 }
 
