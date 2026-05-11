@@ -48,6 +48,9 @@ async function searchAndGetUrl(query) {
   '--get-title',
   '--no-playlist',
   '--no-warnings',
+  '--no-check-certificates',
+  '--prefer-free-formats',
+  '--audio-quality', '0',
 ];
 
     if (fs.existsSync(COOKIES_PATH)) {
