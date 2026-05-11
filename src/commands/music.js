@@ -7,62 +7,39 @@ const {
   entersState,
 } = require('@discordjs/voice');
 const { EmbedBuilder } = require('discord.js');
-const { spawn, execSync } = require('child_process');
+const { spawn } = require('child_process');
+const path = require('path');
+const fs = require('fs');
 const ffmpegStatic = require('ffmpeg-static');
 const YTDlpWrap = require('yt-dlp-wrap').default;
 
-// --- yt-dlp singleton -------------------------------------------------------
-function findYtDlpBinary() {
-  const candidates = [
-    '/usr/bin/yt-dlp',
-    '/usr/local/bin/yt-dlp',
-    '/nix/var/nix/profiles/default/bin/yt-dlp',
-    '/root/.nix-profile/bin/yt-dlp',
-  ];
-
-  for (const path of candidates) {
-    try {
-      execSync(`test -f ${path}`);
-      console.log(`[yt-dlp] Binario encontrado en: ${path}`);
-      return path;
-    } catch {}
-  }
-
-  try {
-    const path = execSync('which yt-dlp').toString().trim();
-    if (path) {
-      console.log(`[yt-dlp] Binario encontrado con which: ${path}`);
-      return path;
-    }
-  } catch {}
-
-  console.warn('[yt-dlp] No se encontro binario en el sistema.');
-  return null;
-}
-
+// ─── yt-dlp singleton ───────────────────────────────────────────────────────
+const YTDLP_PATH = path.join('/app', 'yt-dlp-bin');
 let ytDlp = null;
 
 async function getYtDlp() {
   if (!ytDlp) {
-    const binaryPath = findYtDlpBinary();
-    if (binaryPath) {
-      ytDlp = new YTDlpWrap(binaryPath);
-    } else {
-      ytDlp = new YTDlpWrap();
-      try {
-        await YTDlpWrap.downloadFromGithub();
-        console.log('[yt-dlp] Binario descargado de GitHub correctamente.');
-      } catch (e) {
-        console.error('[yt-dlp] No se pudo descargar el binario:', e.message);
+    try {
+      if (!fs.existsSync(YTDLP_PATH)) {
+        console.log('[yt-dlp] Descargando binario...');
+        await YTDlpWrap.downloadFromGithub(YTDLP_PATH);
+        console.log('[yt-dlp] Binario descargado en:', YTDLP_PATH);
+      } else {
+        console.log('[yt-dlp] Binario ya existe en:', YTDLP_PATH);
       }
+      ytDlp = new YTDlpWrap(YTDLP_PATH);
+    } catch (e) {
+      console.error('[yt-dlp] Error descargando binario:', e.message);
+      throw e;
     }
   }
   return ytDlp;
 }
 
+// Descarga el binario al arrancar
 getYtDlp();
 
-// --- Helpers ----------------------------------------------------------------
+// ─── Helpers ────────────────────────────────────────────────────────────────
 function getQueue(client, guildId) {
   if (!client.musicQueues.has(guildId)) {
     client.musicQueues.set(guildId, {
@@ -114,7 +91,7 @@ function getStream(url) {
     const proc = spawn(ffmpegStatic, args);
 
     proc.on('error', (err) => {
-      console.error('[ffmpeg] Error al spawnear:', err);
+      console.error('[ffmpeg] Error:', err);
       reject(err);
     });
 
@@ -122,19 +99,14 @@ function getStream(url) {
   });
 }
 
-// --- Comandos ---------------------------------------------------------------
+// ─── Comandos ────────────────────────────────────────────────────────────────
 
 async function join(client, message) {
   const voiceChannel = message.member?.voice?.channel;
-  if (!voiceChannel) {
-    return message.channel.send('No estas en un canal de voz.');
-  }
+  if (!voiceChannel) return message.channel.send('No estás en un canal de voz.');
 
   const queue = getQueue(client, message.guild.id);
-
-  if (queue.connection) {
-    return message.channel.send('Ya estoy en un canal de voz.');
-  }
+  if (queue.connection) return message.channel.send('Ya estoy en un canal de voz.');
 
   const connection = joinVoiceChannel({
     channelId: voiceChannel.id,
@@ -156,19 +128,15 @@ async function join(client, message) {
     }
   });
 
-  message.channel.send(`Me uni a **${voiceChannel.name}**.`);
+  message.channel.send(`Me uní a **${voiceChannel.name}**.`);
 }
 
 async function play(client, message, content) {
   const voiceChannel = message.member?.voice?.channel;
-  if (!voiceChannel) {
-    return message.channel.send('No estas en un canal de voz.');
-  }
+  if (!voiceChannel) return message.channel.send('No estás en un canal de voz.');
 
   const query = content.replace(/^play\s+/i, '').trim();
-  if (!query) {
-    return message.channel.send('Especifica una cancion. Uso: `,play <nombre o URL>`');
-  }
+  if (!query) return message.channel.send('Especifica una canción. Uso: `,play <nombre o URL>`');
 
   const queue = getQueue(client, message.guild.id);
 
@@ -193,15 +161,13 @@ async function play(client, message, content) {
     });
   }
 
-  const loadingMsg = await message.channel.send('Buscando cancion...');
+  const loadingMsg = await message.channel.send('Buscando canción...');
 
   try {
     const { title, url } = await searchAndGetUrl(query);
     const stream = await getStream(url);
 
-    const resource = createAudioResource(stream, {
-      inputType: 'raw',
-    });
+    const resource = createAudioResource(stream, { inputType: 'raw' });
 
     if (!queue.player) {
       queue.player = createAudioPlayer();
@@ -214,10 +180,7 @@ async function play(client, message, content) {
     queue.player.play(resource);
     queue.playing = true;
 
-    queue.player.on(AudioPlayerStatus.Idle, () => {
-      queue.playing = false;
-    });
-
+    queue.player.on(AudioPlayerStatus.Idle, () => { queue.playing = false; });
     queue.player.on('error', (err) => {
       console.error('[player] Error:', err);
       queue.playing = false;
@@ -236,50 +199,41 @@ async function play(client, message, content) {
   } catch (err) {
     console.error('[play] Error:', err);
     await loadingMsg.delete().catch(() => {});
-    message.channel.send('No pude reproducir esa cancion. Intenta con otro link o nombre.');
+    message.channel.send('No pude reproducir esa canción. Intenta con otro link o nombre.');
   }
 }
 
 async function pause(client, message) {
   const queue = getQueue(client, message.guild.id);
-
   if (!queue.player || queue.player.state.status !== AudioPlayerStatus.Playing) {
-    return message.channel.send('No hay nada reproduciendose.');
+    return message.channel.send('No hay nada reproduciéndose.');
   }
-
   queue.player.pause();
   queue.playing = false;
-  message.channel.send('Cancion pausada.');
+  message.channel.send('Canción pausada.');
 }
 
 async function resume(client, message) {
   const queue = getQueue(client, message.guild.id);
-
   if (!queue.player || queue.player.state.status !== AudioPlayerStatus.Paused) {
     return message.channel.send('No hay nada pausado.');
   }
-
   queue.player.unpause();
   queue.playing = true;
-  message.channel.send('Cancion reanudada.');
+  message.channel.send('Canción reanudada.');
 }
 
 async function stop(client, message) {
   const queue = getQueue(client, message.guild.id);
-
-  if (!queue.player) {
-    return message.channel.send('No hay nada reproduciendose.');
-  }
+  if (!queue.player) return message.channel.send('No hay nada reproduciéndose.');
 
   queue.player.stop();
   queue.playing = false;
 
-  if (queue.connection) {
-    queue.connection.destroy();
-  }
+  if (queue.connection) queue.connection.destroy();
 
   client.musicQueues.delete(message.guild.id);
-  message.channel.send('Reproduccion detenida y sali del canal.');
+  message.channel.send('Reproducción detenida y salí del canal.');
 }
 
 module.exports = { join, play, pause, resume, stop };
