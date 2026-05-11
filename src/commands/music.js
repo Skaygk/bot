@@ -13,12 +13,19 @@ const playdl = require('play-dl');
 (async () => {
   if (process.env.YOUTUBE_COOKIES) {
     try {
+      // Limpiar cookies: eliminar saltos de linea, tabs y caracteres invalidos
+      const rawCookie = process.env.YOUTUBE_COOKIES
+        .replace(/\r?\n/g, ' ')   // saltos de linea → espacio
+        .replace(/\t/g, ' ')      // tabs → espacio
+        .replace(/\s+/g, ' ')     // espacios multiples → uno solo
+        .trim();
+
       await playdl.setToken({
         youtube: {
-          cookie: process.env.YOUTUBE_COOKIES,
+          cookie: rawCookie,
         },
       });
-      console.log('[play-dl] Cookies de YouTube configuradas correctamente.');
+      console.log('[play-dl] Cookies configuradas correctamente.');
     } catch (e) {
       console.warn('[play-dl] Error al configurar cookies:', e.message);
     }
