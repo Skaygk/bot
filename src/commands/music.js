@@ -9,6 +9,18 @@ const {
 const { EmbedBuilder } = require('discord.js');
 const playdl = require('play-dl');
 
+// ─── Inicializar SoundCloud (obtiene client_id automaticamente) ──────────────
+(async () => {
+  try {
+    await playdl.getFreeClientID().then((id) => {
+      playdl.setToken({ soundcloud: { client_id: id } });
+      console.log('[play-dl] SoundCloud client_id configurado:', id);
+    });
+  } catch (e) {
+    console.warn('[play-dl] Error al inicializar SoundCloud:', e.message);
+  }
+})();
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 function getQueue(client, guildId) {
   if (!client.musicQueues.has(guildId)) {
@@ -21,7 +33,6 @@ function getQueue(client, guildId) {
   return client.musicQueues.get(guildId);
 }
 
-// ─── Buscar en SoundCloud (no bloquea IPs de datacenter) ────────────────────
 async function searchSoundCloud(query) {
   const isUrl = query.startsWith('http');
 
@@ -36,7 +47,6 @@ async function searchSoundCloud(query) {
   });
 
   if (!results || results.length === 0) throw new Error('Sin resultados');
-
   return { title: results[0].name, url: results[0].url };
 }
 
