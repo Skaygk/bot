@@ -6,16 +6,9 @@ const {
   VoiceConnectionStatus,
   entersState,
 } = require('@discordjs/voice');
-const playdl = require('play-dl');
 const { EmbedBuilder } = require('discord.js');
-
-if (process.env.YOUTUBE_COOKIE) {
-  playdl.setToken({
-    youtube: {
-      cookie: process.env.YOUTUBE_COOKIE,
-    },
-  });
-}
+const { exec } = require('child_process');
+const { Readable } = require('stream');
 
 function getQueue(client, guildId) {
   if (!client.musicQueues.has(guildId)) {
@@ -26,6 +19,43 @@ function getQueue(client, guildId) {
     });
   }
   return client.musicQueues.get(guildId);
+}
+
+function searchAndGetUrl(query) {
+  return new Promise((resolve, reject) => {
+    const isUrl = query.startsWith('http');
+    const target = isUrl ? query : `ytsearch1:${query}`;
+    const cmd = `yt-dlp -f bestaudio --get-url --get-title "${target}"`;
+    exec(cmd, (err, stdout) => {
+      if (err) return reject(err);
+      const lines = stdout.trim().split('\n').filter(Boolean);
+      if (lines.length < 2) return reject(new Error('No results'));
+      const title = lines[0];
+      const url = lines[lines.length - 1];
+      resolve({ title, url });
+    });
+  });
+}
+
+function getStream(url) {
+  return new Promise((resolve, reject) => {
+    const ffmpegStatic = require('ffmpeg-static');
+    const { spawn } = require('child_process');
+    const args = [
+      '-reconnect', '1',
+      '-reconnect_streamed', '1',
+      '-reconnect_delay_max', '5',
+      '-i', url,
+      '-analyzeduration', '0',
+      '-loglevel', '0',
+      '-f', 's16le',
+      '-ar', '48000',
+      '-ac', '2',
+      'pipe:1'
+    ];
+    const process = spawn(ffmpegStatic, args);
+    resolve(process.stdout);
+  });
 }
 
 async function join(client, message) {
@@ -80,33 +110,11 @@ async function play(client, message, content) {
   }
 
   try {
-    let url;
-    let songTitle;
+    const { title, url } = await searchAndGetUrl(query);
+    const stream = await getStream(url);
 
-    const urlCheck = await playdl.validate(query);
-
-    if (urlCheck === 'yt_video') {
-      const info = await playdl.video_info(query);
-      url = query;
-      songTitle = info.video_details.title;
-    } else {
-      const results = await playdl.search(query, { limit: 1 });
-      if (!results || results.length === 0) {
-        return message.channel.send('No encontre ninguna cancion con ese nombre.');
-      }
-      console.log('Search result:', JSON.stringify(results[0], null, 2));
-      const videoId = results[0].id;
-      console.log('Video ID:', videoId);
-      url = `https://www.youtube.com/watch?v=${videoId}`;
-      songTitle = results[0].title;
-    }
-
-    console.log('Final URL:', url);
-
-    const stream = await playdl.stream(url, { quality: 2 });
-
-    const resource = createAudioResource(stream.stream, {
-      inputType: stream.type,
+    const resource = createAudioResource(stream, {
+      inputType: 'raw',
     });
 
     if (!queue.player) {
@@ -132,7 +140,7 @@ async function play(client, message, content) {
     const embed = new EmbedBuilder()
       .setColor(0x1db954)
       .setTitle('Reproduciendo')
-      .setDescription(`**${songTitle}**`)
+      .setDescription(`**${title}**`)
       .setFooter({ text: `Solicitado por ${message.author.tag}` })
       .setTimestamp();
 
