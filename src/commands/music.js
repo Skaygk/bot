@@ -43,7 +43,7 @@ async function searchAndGetUrl(query) {
   return new Promise((resolve, reject) => {
     const args = [
       target,
-      '-f', 'bestaudio',
+      '-f', 'bestaudio/best',
       '--get-url',
       '--get-title',
       '--no-playlist',
