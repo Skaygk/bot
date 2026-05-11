@@ -141,10 +141,10 @@ async function playNext(client, guildId, textChannel) {
 
 // ─── Helper: crear player y adjuntar eventos ─────────────────────────────────
 async function createPlayer(client, message, voiceChannel) {
-  const node  = getNode(client);
   const queue = getQueue(client, message.guild.id);
 
-  const player = await node.joinChannel({
+  // Shoukaku v4: joinVoiceChannel está en client.shoukaku, no en el nodo
+  const player = await client.shoukaku.joinVoiceChannel({
     guildId:   message.guild.id,
     channelId: voiceChannel.id,
     shardId:   message.guild.shardId ?? 0,
@@ -181,8 +181,9 @@ async function destroyQueue(client, guildId) {
   if (!queue) return;
 
   if (queue.player) {
-    try { queue.player.connection.disconnect(); } catch (_) {}
-    await queue.player.destroyPlayer().catch(() => {});
+    try { await queue.player.stopTrack(); } catch (_) {}
+    // Shoukaku v4: leaveVoiceChannel en el manager
+    try { await client.shoukaku.leaveVoiceChannel(guildId); } catch (_) {}
   }
   client.musicQueues.delete(guildId);
 }
@@ -236,12 +237,16 @@ async function join(client, message) {
   const queue = getQueue(client, message.guild.id);
 
   if (queue.player) {
-    // Mover al nuevo canal
+    // Mover al nuevo canal usando la API de Discord.js directamente
     try {
-      await queue.player.connection.setStateUpdate({
-        channel_id: voiceChannel.id,
-        self_deaf: true,
-        self_mute: false,
+      message.guild.shard.send({
+        op: 4,
+        d: {
+          guild_id:   message.guild.id,
+          channel_id: voiceChannel.id,
+          self_mute:  false,
+          self_deaf:  true,
+        },
       });
       message.channel.send(`Me movi a **${voiceChannel.name}**.`);
     } catch (err) {
