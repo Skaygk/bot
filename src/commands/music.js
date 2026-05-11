@@ -6,8 +6,7 @@ const {
   VoiceConnectionStatus,
   entersState,
 } = require('@discordjs/voice');
-const ytdl = require('@distube/ytdl-core');
-const yts  = require('yt-search');
+const playdl = require('play-dl');
 const { EmbedBuilder } = require('discord.js');
 
 function getQueue(client, guildId) {
@@ -23,12 +22,12 @@ function getQueue(client, guildId) {
 
 async function join(client, message) {
   const voiceChannel = message.member.voice.channel;
-  if (!voiceChannel) return message.channel.send('Debes estar en un canal de voz.');
+  if (!voiceChannel) return message.channel.send('❌ Debes estar en un canal de voz.');
 
   const queue = getQueue(client, message.guild.id);
 
   if (queue.connection) {
-    return message.channel.send('Ya estoy en un canal de voz.');
+    return message.channel.send('✅ Ya estoy en un canal de voz.');
   }
 
   const connection = joinVoiceChannel({
@@ -51,15 +50,15 @@ async function join(client, message) {
     }
   });
 
-  message.channel.send(` Me uní a **${voiceChannel.name}**.`);
+  message.channel.send(`✅ Me uní a **${voiceChannel.name}**.`);
 }
 
 async function play(client, message, content) {
   const voiceChannel = message.member.voice.channel;
-  if (!voiceChannel) return message.channel.send(' Debes estar en un canal de voz.');
+  if (!voiceChannel) return message.channel.send('Debes estar en un vc');
 
   const query = content.replace(/^play\s+/i, '').trim();
-  if (!query) return message.channel.send(' Especifica una canción. Uso: `,play <nombre o URL>`');
+  if (!query) return message.channel.send('Especifica una canción. asi: `,play <nombre o URL>`');
 
   const queue = getQueue(client, message.guild.id);
 
@@ -72,37 +71,41 @@ async function play(client, message, content) {
     queue.connection = connection;
   }
 
-  let url = query;
-  let songTitle = query;
-
-  if (!ytdl.validateURL(query)) {
-    const results = await yts(query);
-    const video = results.videos[0];
-    if (!video) return message.channel.send(' No encontré ninguna canción con ese nombre.');
-    url = video.url;
-    songTitle = video.title;
-  } else {
-    try {
-      const info = await ytdl.getBasicInfo(url);
-      songTitle = info.videoDetails.title;
-    } catch (_) {}
-  }
-
-  if (!queue.player) {
-    queue.player = createAudioPlayer();
-    queue.connection.subscribe(queue.player);
-  }
-
   try {
-    const stream = ytdl(url, {
-      filter: 'audioonly',
-      quality: 'highestaudio',
-      highWaterMark: 1 << 25,
+    let url;
+    let songTitle;
+
+    const urlCheck = await playdl.validate(query);
+
+    if (urlCheck && urlCheck !== 'search') {
+      const info = await playdl.video_info(query);
+      url = query;
+      songTitle = info.video_details.title;
+    } else {
+      const results = await playdl.search(query, { limit: 1 });
+      if (!results || results.length === 0) {
+        return message.channel.send('ulu no encontro esa cancion');
+      }
+      url = results[0].url;
+      songTitle = results[0].title;
+    }
+
+    const stream = await playdl.stream(url, { quality: 2 });
+
+    const resource = createAudioResource(stream.stream, {
+      inputType: stream.type,
     });
 
-    const resource = createAudioResource(stream);
+    if (!queue.player) {
+      queue.player = createAudioPlayer();
+      queue.connection.subscribe(queue.player);
+    }
+
     queue.player.play(resource);
     queue.playing = true;
+
+    queue.player.removeAllListeners(AudioPlayerStatus.Idle);
+    queue.player.removeAllListeners('error');
 
     queue.player.on(AudioPlayerStatus.Idle, () => {
       queue.playing = false;
@@ -123,27 +126,29 @@ async function play(client, message, content) {
     message.channel.send({ embeds: [embed] });
 
   } catch (err) {
-    console.error(err);
-    message.channel.send(' No pude reproducir esa canción.');
+    console.error('Play error:', err);
+    message.channel.send('No pude reproducir esa canción. Intenta con otro link o nombre.');
   }
 }
 
 async function pause(client, message) {
   const queue = getQueue(client, message.guild.id);
-  if (!queue.player || !queue.playing) {
-    return message.channel.send(' No hay nada reproduciéndose.');
+  if (!queue.player || queue.player.state.status !== AudioPlayerStatus.Playing) {
+    return message.channel.send('no hay nada reproduciéndose.');
   }
   queue.player.pause();
-  message.channel.send('⏸ Música pausada.');
+  queue.playing = false;
+  message.channel.send('pausada.');
 }
 
 async function resume(client, message) {
   const queue = getQueue(client, message.guild.id);
-  if (!queue.player) {
-    return message.channel.send(' No hay nada en cola.');
+  if (!queue.player || queue.player.state.status !== AudioPlayerStatus.Paused) {
+    return message.channel.send('No hay nada pausado.');
   }
   queue.player.unpause();
-  message.channel.send('Música reanudada.');
+  queue.playing = true;
+  message.channel.send('continuando.');
 }
 
 module.exports = { join, play, pause, resume };
