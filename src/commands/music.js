@@ -41,15 +41,16 @@ async function searchAndGetUrl(query) {
   const target = isUrl ? query : `ytsearch1:${query}`;
 
   return new Promise((resolve, reject) => {
+    // --print respeta el selector -f correctamente, a diferencia de --get-url
     const args = [
       target,
-      '--get-title',
-      '--get-url',
+      '--print', 'title',
+      '--print', 'url',
       '--no-playlist',
       '--no-warnings',
       '--no-check-certificates',
-      '-f', 'bestaudio/best',
-      '--audio-quality', '0',
+      '-f', 'bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio/best',
+      '--format-sort', 'acodec:opus,acodec:aac,abr',
       '--extractor-retries', '3',
     ];
 
