@@ -3,14 +3,14 @@ const { EmbedBuilder } = require('discord.js');
 // ,role add <nombre del rol> @usuario
 async function roleAdd(client, message, content) {
   if (!message.member.permissions.has('ManageRoles')) {
-    return message.channel.send('❌ No tienes permisos para gestionar roles.');
+    return message.channel.send('No tienes permisos para gestionar roles.');
   }
   if (!message.guild.members.me.permissions.has('ManageRoles')) {
-    return message.channel.send('❌ No tengo permisos para gestionar roles.');
+    return message.channel.send('No tengo permisos para gestionar roles.');
   }
 
   const target = message.mentions.members.first();
-  if (!target) return message.channel.send('❌ Menciona un usuario. Uso: `,role add <nombre del rol> @usuario`');
+  if (!target) return message.channel.send('Menciona un usuario. Uso: `,role add <nombre del rol> @usuario`');
 
   // content = "role add <rolename> @mention"
   // Remove "role add " prefix
@@ -21,7 +21,7 @@ async function roleAdd(client, message, content) {
   const roleName = afterCmd.replace(mentionRegex, '').trim();
 
   if (!roleName) {
-    return message.channel.send('❌ Especifica el nombre del rol. Uso: `,role add <nombre del rol> @usuario`');
+    return message.channel.send('Especifica el nombre del rol. Uso: `,role add <nombre del rol> @usuario`');
   }
 
   // Find role by name (case-insensitive)
@@ -30,11 +30,11 @@ async function roleAdd(client, message, content) {
   );
 
   if (!role) {
-    return message.channel.send(`❌ No encontré un rol llamado **${roleName}**.`);
+    return message.channel.send(`No encontré un rol llamado **${roleName}**.`);
   }
 
   if (role.position >= message.guild.members.me.roles.highest.position) {
-    return message.channel.send('❌ Ese rol está por encima de mi rol más alto, no puedo asignarlo.');
+    return message.channel.send('Ese rol está por encima de mi rol más alto, no puedo asignarlo.');
   }
 
   try {
