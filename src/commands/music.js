@@ -7,36 +7,22 @@ const {
   entersState,
 } = require('@discordjs/voice');
 const { EmbedBuilder } = require('discord.js');
-const { spawn, execSync } = require('child_process');
+const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const ffmpegStatic = require('ffmpeg-static');
-const YTDlpWrap = require('yt-dlp-wrap').default;
 
-// ─── yt-dlp singleton ───────────────────────────────────────────────────────
-const YTDLP_PATH = path.join('/app', 'yt-dlp-bin');
-let ytDlp = null;
-
-async function getYtDlp() {
-  if (!ytDlp) {
-    try {
-      if (!fs.existsSync(YTDLP_PATH)) {
-        console.log('[yt-dlp] Descargando binario...');
-        await YTDlpWrap.downloadFromGithub(YTDLP_PATH);
-        console.log('[yt-dlp] Binario descargado en:', YTDLP_PATH);
-      } else {
-        console.log('[yt-dlp] Binario ya existe en:', YTDLP_PATH);
-      }
-      ytDlp = new YTDlpWrap(YTDLP_PATH);
-    } catch (e) {
-      console.error('[yt-dlp] Error descargando binario:', e.message);
-      throw e;
-    }
-  }
-  return ytDlp;
+// ─── Cookies desde variable de entorno ──────────────────────────────────────
+const COOKIES_PATH = path.join('/tmp', 'cookies.txt');
+if (process.env.YOUTUBE_COOKIES) {
+  fs.writeFileSync(COOKIES_PATH, process.env.YOUTUBE_COOKIES);
+  console.log('[cookies] Archivo de cookies creado en:', COOKIES_PATH);
+} else {
+  console.warn('[cookies] No se encontro la variable YOUTUBE_COOKIES.');
 }
 
-getYtDlp();
+// ─── yt-dlp ─────────────────────────────────────────────────────────────────
+const YTDLP_PATH = '/usr/local/bin/yt-dlp';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 function getQueue(client, guildId) {
@@ -54,9 +40,8 @@ async function searchAndGetUrl(query) {
   const isUrl = query.startsWith('http');
   const target = isUrl ? query : `ytsearch1:${query}`;
 
-  // Usamos exec directo con node para evitar dependencia de python
   return new Promise((resolve, reject) => {
-    const proc = spawn(YTDLP_PATH, [
+    const args = [
       target,
       '-f', 'bestaudio',
       '--get-url',
@@ -64,7 +49,13 @@ async function searchAndGetUrl(query) {
       '--no-playlist',
       '--no-warnings',
       '--extractor-args', 'youtube:skip=dash',
-    ]);
+    ];
+
+    if (fs.existsSync(COOKIES_PATH)) {
+      args.push('--cookies', COOKIES_PATH);
+    }
+
+    const proc = spawn(YTDLP_PATH, args);
 
     let stdout = '';
     let stderr = '';
@@ -78,7 +69,7 @@ async function searchAndGetUrl(query) {
         return reject(new Error('yt-dlp fallo: ' + stderr));
       }
       const lines = stdout.trim().split('\n').filter(Boolean);
-      if (lines.length < 2) return reject(new Error('No results found'));
+      if (lines.length < 2) return reject(new Error('No se encontraron resultados'));
       const title = lines[0];
       const url = lines[lines.length - 1];
       resolve({ title, url });
