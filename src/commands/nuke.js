@@ -48,7 +48,7 @@ async function nuke(client, message) {
   const embed = new EmbedBuilder()
     .setColor(0xff0000)
     .setTitle('💥 Canal nukeado')
-    .setDescription('El canal fue eliminado y recreado con los mismos permisos.')
+    .setDescription('nukesito vro')
     .setTimestamp();
 
   await newChannel.send({ embeds: [embed] });
