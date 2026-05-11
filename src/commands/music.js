@@ -9,6 +9,24 @@ const {
 const { EmbedBuilder } = require('discord.js');
 const playdl = require('play-dl');
 
+// ─── Autenticacion con cookies de YouTube ───────────────────────────────────
+(async () => {
+  if (process.env.YOUTUBE_COOKIES) {
+    try {
+      await playdl.setToken({
+        youtube: {
+          cookie: process.env.YOUTUBE_COOKIES,
+        },
+      });
+      console.log('[play-dl] Cookies de YouTube configuradas correctamente.');
+    } catch (e) {
+      console.warn('[play-dl] Error al configurar cookies:', e.message);
+    }
+  } else {
+    console.warn('[play-dl] No se encontro YOUTUBE_COOKIES.');
+  }
+})();
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 function getQueue(client, guildId) {
   if (!client.musicQueues.has(guildId)) {
@@ -86,19 +104,16 @@ async function play(client, message, content) {
   const loadingMsg = await message.channel.send('Buscando cancion...');
 
   try {
-    // Buscar por nombre o URL directa
     let videoUrl;
     let title;
 
     const isUrl = query.startsWith('http');
 
     if (isUrl) {
-      // Es una URL directa de YouTube
       const info = await playdl.video_info(query);
       title = info.video_details.title;
       videoUrl = query;
     } else {
-      // Buscar por nombre
       const results = await playdl.search(query, { limit: 1 });
       if (!results || results.length === 0) {
         await loadingMsg.delete().catch(() => {});
@@ -111,7 +126,6 @@ async function play(client, message, content) {
     console.log('[play] Titulo:', title);
     console.log('[play] URL:', videoUrl);
 
-    // Obtener stream directo con play-dl
     const stream = await playdl.stream(videoUrl, { quality: 2 });
 
     const resource = createAudioResource(stream.stream, {
