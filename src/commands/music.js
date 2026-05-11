@@ -36,74 +36,78 @@ function getQueue(client, guildId) {
   return client.musicQueues.get(guildId);
 }
 
-async function searchAndGetUrl(query) {
+// Obtiene solo el titulo de la cancion
+async function getTitle(query) {
   const isUrl = query.startsWith('http');
   const target = isUrl ? query : `ytsearch1:${query}`;
 
   return new Promise((resolve, reject) => {
-    // --print respeta el selector -f correctamente, a diferencia de --get-url
     const args = [
       target,
       '--print', 'title',
-      '--print', 'url',
       '--no-playlist',
       '--no-warnings',
       '--no-check-certificates',
-      '-f', 'bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio/best',
-      '--format-sort', 'acodec:opus,acodec:aac,abr',
-      '--extractor-retries', '3',
     ];
 
-    if (fs.existsSync(COOKIES_PATH)) {
-      args.push('--cookies', COOKIES_PATH);
-    }
+    if (fs.existsSync(COOKIES_PATH)) args.push('--cookies', COOKIES_PATH);
 
     const proc = spawn(YTDLP_PATH, args);
-
-    let stdout = '';
-    let stderr = '';
-
-    proc.stdout.on('data', (d) => { stdout += d.toString(); });
-    proc.stderr.on('data', (d) => { stderr += d.toString(); });
-
+    let out = '';
+    proc.stdout.on('data', (d) => { out += d.toString(); });
     proc.on('close', (code) => {
-      if (code !== 0) {
-        console.error('[yt-dlp stderr]', stderr);
-        return reject(new Error('yt-dlp fallo: ' + stderr));
-      }
-      const lines = stdout.trim().split('\n').filter(Boolean);
-      if (lines.length < 2) return reject(new Error('No se encontraron resultados'));
-      const title = lines[0];
-      const url = lines[lines.length - 1];
-      resolve({ title, url });
+      if (code !== 0) return reject(new Error('No se pudo obtener el titulo'));
+      resolve(out.trim().split('\n')[0] || 'Sin titulo');
     });
-
     proc.on('error', reject);
   });
 }
 
-function getStream(url) {
-  return new Promise((resolve, reject) => {
-    const args = [
-      '-reconnect', '1',
-      '-reconnect_streamed', '1',
-      '-reconnect_delay_max', '5',
-      '-i', url,
-      '-analyzeduration', '0',
-      '-loglevel', '0',
-      '-f', 's16le',
-      '-ar', '48000',
-      '-ac', '2',
-      'pipe:1',
-    ];
+// yt-dlp descarga audio y lo pipa directo a ffmpeg
+// No necesita obtener URL ni preocuparse por formatos
+function getStream(query) {
+  const isUrl = query.startsWith('http');
+  const target = isUrl ? query : `ytsearch1:${query}`;
 
-    const proc = spawn(ffmpegStatic, args);
-    proc.on('error', (err) => {
-      console.error('[ffmpeg] Error:', err);
-      reject(err);
-    });
-    resolve(proc.stdout);
+  const ytdlpArgs = [
+    target,
+    '--no-playlist',
+    '--no-warnings',
+    '--no-check-certificates',
+    '-o', '-',          // output a stdout
+    '-f', 'bestaudio',  // yt-dlp elige el mejor audio disponible internamente
+    '-q',               // silencioso
+  ];
+
+  if (fs.existsSync(COOKIES_PATH)) ytdlpArgs.push('--cookies', COOKIES_PATH);
+
+  const ffmpegArgs = [
+    '-i', 'pipe:0',       // lee desde stdin (pipe de yt-dlp)
+    '-analyzeduration', '0',
+    '-loglevel', '0',
+    '-f', 's16le',
+    '-ar', '48000',
+    '-ac', '2',
+    'pipe:1',             // output a stdout
+  ];
+
+  const ytdlp = spawn(YTDLP_PATH, ytdlpArgs);
+  const ffmpeg = spawn(ffmpegStatic, ffmpegArgs);
+
+  // Conectar yt-dlp stdout → ffmpeg stdin
+  ytdlp.stdout.pipe(ffmpeg.stdin);
+
+  ytdlp.on('error', (err) => console.error('[yt-dlp] Error:', err));
+  ffmpeg.on('error', (err) => console.error('[ffmpeg] Error:', err));
+
+  ytdlp.stderr.on('data', (d) => console.error('[yt-dlp stderr]', d.toString()));
+
+  // Si yt-dlp termina con error, cerrar ffmpeg
+  ytdlp.on('close', (code) => {
+    if (code !== 0) ffmpeg.stdin.destroy();
   });
+
+  return ffmpeg.stdout;
 }
 
 // ─── Comandos ────────────────────────────────────────────────────────────────
@@ -171,11 +175,13 @@ async function play(client, message, content) {
   const loadingMsg = await message.channel.send('Buscando cancion...');
 
   try {
-    const { title, url } = await searchAndGetUrl(query);
-    console.log('[play] Titulo:', title);
-    console.log('[play] URL obtenida:', url.substring(0, 80) + '...');
+    // Obtener titulo y stream en paralelo para ser mas rapido
+    const [title, stream] = await Promise.all([
+      getTitle(query),
+      Promise.resolve(getStream(query)),
+    ]);
 
-    const stream = await getStream(url);
+    console.log('[play] Titulo:', title);
 
     const resource = createAudioResource(stream, { inputType: 'raw' });
 
