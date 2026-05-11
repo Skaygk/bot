@@ -159,7 +159,7 @@ async function pause(client, message) {
   }
   queue.player.pause();
   queue.playing = false;
-  message.channel.send('Musica pausada.');
+  message.channel.send('pausada.');
 }
 
 async function resume(client, message) {
@@ -169,7 +169,7 @@ async function resume(client, message) {
   }
   queue.player.unpause();
   queue.playing = true;
-  message.channel.send('Musica reanudada.');
+  message.channel.send('reanudada.');
 }
 
 module.exports = { join, play, pause, resume };
