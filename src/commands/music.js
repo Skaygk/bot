@@ -36,78 +36,93 @@ function getQueue(client, guildId) {
   return client.musicQueues.get(guildId);
 }
 
-// Obtiene solo el titulo de la cancion
-async function getTitle(query) {
+// Intenta obtener titulo+url probando multiples selectores de formato
+async function searchAndGetUrl(query) {
   const isUrl = query.startsWith('http');
   const target = isUrl ? query : `ytsearch1:${query}`;
 
-  return new Promise((resolve, reject) => {
-    const args = [
-      target,
-      '--print', 'title',
-      '--no-playlist',
-      '--no-warnings',
-      '--no-check-certificates',
-    ];
+  // Lista de selectores a probar en orden
+  const formatSelectors = [
+    'bestaudio[ext=webm]',
+    'bestaudio[ext=m4a]',
+    'bestaudio',
+    '251',   // opus webm comun en YouTube
+    '140',   // m4a comun en YouTube
+    'worst', // ultimo recurso, cualquier formato
+  ];
 
-    if (fs.existsSync(COOKIES_PATH)) args.push('--cookies', COOKIES_PATH);
-
-    const proc = spawn(YTDLP_PATH, args);
-    let out = '';
-    proc.stdout.on('data', (d) => { out += d.toString(); });
-    proc.on('close', (code) => {
-      if (code !== 0) return reject(new Error('No se pudo obtener el titulo'));
-      resolve(out.trim().split('\n')[0] || 'Sin titulo');
-    });
-    proc.on('error', reject);
-  });
-}
-
-// yt-dlp descarga audio y lo pipa directo a ffmpeg
-// No necesita obtener URL ni preocuparse por formatos
-function getStream(query) {
-  const isUrl = query.startsWith('http');
-  const target = isUrl ? query : `ytsearch1:${query}`;
-
-  const ytdlpArgs = [
+  const baseArgs = [
     target,
     '--no-playlist',
     '--no-warnings',
     '--no-check-certificates',
-    '-o', '-',          // output a stdout
-    '-f', 'bestaudio',  // yt-dlp elige el mejor audio disponible internamente
-    '-q',               // silencioso
+    '--extractor-retries', '3',
   ];
 
-  if (fs.existsSync(COOKIES_PATH)) ytdlpArgs.push('--cookies', COOKIES_PATH);
+  if (fs.existsSync(COOKIES_PATH)) baseArgs.push('--cookies', COOKIES_PATH);
 
-  const ffmpegArgs = [
-    '-i', 'pipe:0',       // lee desde stdin (pipe de yt-dlp)
-    '-analyzeduration', '0',
-    '-loglevel', '0',
-    '-f', 's16le',
-    '-ar', '48000',
-    '-ac', '2',
-    'pipe:1',             // output a stdout
-  ];
+  for (const fmt of formatSelectors) {
+    try {
+      const result = await tryFormat(target, fmt, baseArgs);
+      console.log(`[yt-dlp] Formato exitoso: ${fmt}`);
+      return result;
+    } catch (e) {
+      console.warn(`[yt-dlp] Formato "${fmt}" fallo, probando siguiente...`);
+    }
+  }
 
-  const ytdlp = spawn(YTDLP_PATH, ytdlpArgs);
-  const ffmpeg = spawn(ffmpegStatic, ffmpegArgs);
+  throw new Error('Ningún formato disponible para este video.');
+}
 
-  // Conectar yt-dlp stdout → ffmpeg stdin
-  ytdlp.stdout.pipe(ffmpeg.stdin);
+function tryFormat(target, fmt, baseArgs) {
+  return new Promise((resolve, reject) => {
+    const args = [
+      ...baseArgs,
+      '-f', fmt,
+      '--print', 'title',
+      '--print', 'url',
+    ];
 
-  ytdlp.on('error', (err) => console.error('[yt-dlp] Error:', err));
-  ffmpeg.on('error', (err) => console.error('[ffmpeg] Error:', err));
+    const proc = spawn(YTDLP_PATH, args);
+    let stdout = '';
+    let stderr = '';
 
-  ytdlp.stderr.on('data', (d) => console.error('[yt-dlp stderr]', d.toString()));
+    proc.stdout.on('data', (d) => { stdout += d.toString(); });
+    proc.stderr.on('data', (d) => { stderr += d.toString(); });
 
-  // Si yt-dlp termina con error, cerrar ffmpeg
-  ytdlp.on('close', (code) => {
-    if (code !== 0) ffmpeg.stdin.destroy();
+    proc.on('close', (code) => {
+      if (code !== 0) return reject(new Error(stderr));
+      const lines = stdout.trim().split('\n').filter(Boolean);
+      if (lines.length < 2) return reject(new Error('Sin resultados'));
+      resolve({ title: lines[0], url: lines[lines.length - 1] });
+    });
+
+    proc.on('error', reject);
   });
+}
 
-  return ffmpeg.stdout;
+function getStream(url) {
+  return new Promise((resolve, reject) => {
+    const args = [
+      '-reconnect', '1',
+      '-reconnect_streamed', '1',
+      '-reconnect_delay_max', '5',
+      '-i', url,
+      '-analyzeduration', '0',
+      '-loglevel', '0',
+      '-f', 's16le',
+      '-ar', '48000',
+      '-ac', '2',
+      'pipe:1',
+    ];
+
+    const proc = spawn(ffmpegStatic, args);
+    proc.on('error', (err) => {
+      console.error('[ffmpeg] Error:', err);
+      reject(err);
+    });
+    resolve(proc.stdout);
+  });
 }
 
 // ─── Comandos ────────────────────────────────────────────────────────────────
@@ -175,14 +190,11 @@ async function play(client, message, content) {
   const loadingMsg = await message.channel.send('Buscando cancion...');
 
   try {
-    // Obtener titulo y stream en paralelo para ser mas rapido
-    const [title, stream] = await Promise.all([
-      getTitle(query),
-      Promise.resolve(getStream(query)),
-    ]);
-
+    const { title, url } = await searchAndGetUrl(query);
     console.log('[play] Titulo:', title);
+    console.log('[play] URL obtenida:', url.substring(0, 80) + '...');
 
+    const stream = await getStream(url);
     const resource = createAudioResource(stream, { inputType: 'raw' });
 
     if (!queue.player) {
