@@ -1,5 +1,5 @@
 const {
-  joinVoiceChannel,
+  joinVoiceChanne,
   createAudioPlayer,
   createAudioResource,
   AudioPlayerStatus,
