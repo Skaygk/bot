@@ -41,15 +41,14 @@ async function searchAndGetUrl(query) {
   const target = isUrl ? query : `ytsearch1:${query}`;
 
   return new Promise((resolve, reject) => {
-  const args = [
-  target,
-  '-g',                    
-  '--get-title',
-  '--no-playlist',
-  '--no-warnings',
-  '--no-check-certificates',
-  '-f', 'worstaudio/worst[ext=webm]/bestaudio/best',
-];
+    const args = [
+      target,
+      '--get-title',
+      '--get-url',
+      '--no-playlist',
+      '--no-warnings',
+      '--no-check-certificates',
+    ];
 
     if (fs.existsSync(COOKIES_PATH)) {
       args.push('--cookies', COOKIES_PATH);
@@ -169,6 +168,9 @@ async function play(client, message, content) {
 
   try {
     const { title, url } = await searchAndGetUrl(query);
+    console.log('[play] Titulo:', title);
+    console.log('[play] URL obtenida:', url.substring(0, 80) + '...');
+
     const stream = await getStream(url);
 
     const resource = createAudioResource(stream, { inputType: 'raw' });
@@ -202,8 +204,6 @@ async function play(client, message, content) {
 
   } catch (err) {
     console.error('[play] Error completo:', err.message);
-    console.error('[play] Stack:', err.stack);
-    
     await loadingMsg.delete().catch(() => {});
     message.channel.send('No pude reproducir esa cancion. Intenta con otro link o nombre.');
   }
