@@ -30,6 +30,15 @@ function getNode(client) {
   return node;
 }
 
+// Devuelve todos los nodos conectados, el ideal primero
+function getAllNodes(client) {
+  const nodes = [...client.shoukaku.nodes.values()].filter(n => n.state === 2); // 2 = CONNECTED
+  if (!nodes.length) throw new Error('No hay nodos Lavalink disponibles.');
+  const ideal = client.shoukaku.getIdealNode();
+  if (!ideal) return nodes;
+  return [ideal, ...nodes.filter(n => n !== ideal)];
+}
+
 // ─── Formato duración ─────────────────────────────────────────────────────────
 function formatDuration(ms) {
   if (!ms) return '?:??';
@@ -56,30 +65,34 @@ function extractTrack(result) {
   return null;
 }
 
-// ─── Buscar track con múltiples fallbacks ─────────────────────────────────────
-async function searchTrack(node, query) {
+// ─── Buscar track probando todos los nodos disponibles ───────────────────────
+async function searchTrack(client, query) {
+  const nodes      = getAllNodes(client);
   const ytUrl      = isYouTubeUrl(query);
   const genericUrl = !ytUrl && isAnyUrl(query);
 
-  if (ytUrl || genericUrl) {
-    const r = await node.rest.resolve(query).catch(() => null);
-    const t = r ? extractTrack(r) : null;
-    if (t) return t;
-    if (ytUrl) {
-      const r2 = await node.rest.resolve(`ytsearch:${query}`).catch(() => null);
-      const t2 = r2 ? extractTrack(r2) : null;
-      if (t2) return t2;
+  const sources = ytUrl || genericUrl
+    ? [query, ...(ytUrl ? [`ytsearch:${query}`] : [])]
+    : [`ytmsearch:${query}`, `ytsearch:${query}`, `spsearch:${query}`];
+
+  for (const node of nodes) {
+    for (const src of sources) {
+      const r = await node.rest.resolve(src).catch(() => null);
+      const t = r ? extractTrack(r) : null;
+      if (t) {
+        console.log(`[searchTrack] Encontrado en nodo "${node.name}" con fuente: ${src}`);
+        // Adjuntar el nodo que encontró el track para reproducirlo en ese mismo nodo
+        t._sourceNode = node.name;
+        t._sourceQuery = query;
+        return t;
+      }
     }
-    throw new Error('No se pudo cargar ese link. El nodo puede no soportar esa URL.');
   }
 
-  const sources = [`ytmsearch:${query}`, `ytsearch:${query}`, `spsearch:${query}`];
-  for (const src of sources) {
-    const r = await node.rest.resolve(src).catch(() => null);
-    const t = r ? extractTrack(r) : null;
-    if (t) return t;
-  }
-  throw new Error('No se encontro ningun resultado para esa busqueda.');
+  throw new Error(ytUrl || genericUrl
+    ? 'No se pudo cargar ese link en ningun nodo disponible.'
+    : 'No se encontro ningun resultado para esa busqueda.'
+  );
 }
 
 // ─── Timers ───────────────────────────────────────────────────────────────────
@@ -122,12 +135,13 @@ async function destroyQueue(client, guildId) {
 }
 
 // ─── Reproducir siguiente track ───────────────────────────────────────────────
-async function playNext(client, guildId) {
-  // Leer siempre desde el Map, nunca crear una queue nueva aquí
+async function playNext(client, guildId, _retryItem) {
   const queue = client.musicQueues.get(guildId);
   if (!queue) return;
 
-  if (!queue.tracks.length) {
+  // _retryItem: item que falló con loadFailed y se reencola para reintento
+  const item = _retryItem ?? (queue.tracks.length ? queue.tracks.shift() : null);
+  if (!item) {
     queue.playing      = false;
     queue.currentTrack = null;
     queue.requestedBy  = null;
@@ -135,20 +149,18 @@ async function playNext(client, guildId) {
     return;
   }
 
-  const item = queue.tracks.shift();
+  const title    = item.track.info?.title  ?? 'Desconocido';
+  const author   = item.track.info?.author ?? '';
+  const uri      = item.track.info?.uri    ?? '';
+  const duration = formatDuration(item.track.info?.length ?? 0);
 
   try {
-    console.log(`[playNext] Reproduciendo: ${item.track.info?.title}`);
+    console.log(`[playNext] Reproduciendo: ${title}`);
     await queue.player.playTrack({ track: { encoded: item.track.encoded } });
     queue.playing      = true;
     queue.currentTrack = item.track;
     queue.requestedBy  = item.requestedBy;
     clearInactivityTimer(guildId);
-
-    const title    = item.track.info?.title  ?? 'Desconocido';
-    const author   = item.track.info?.author ?? '';
-    const uri      = item.track.info?.uri    ?? '';
-    const duration = formatDuration(item.track.info?.length ?? 0);
 
     const embed = new EmbedBuilder()
       .setColor(0x1db954)
@@ -182,13 +194,37 @@ async function createPlayer(client, guildId, voiceChannelId, shardId, textChanne
   queue.player = player;
 
   // Shoukaku v4 emite 'end' en el player cuando termina un track
-  player.on('end', (data) => {
-    console.log(`[Player] Track terminado en guild ${guildId}`, data?.reason ?? '');
+  player.on('end', async (data) => {
+    const reason = data?.reason ?? '';
+    console.log(`[Player] Track terminado en guild ${guildId} reason=${reason}`);
     const q = client.musicQueues.get(guildId);
     if (!q) return;
     q.playing = false;
-    // 'replaced' = se llamó playTrack mientras ya sonaba algo, no avanzar
-    if (data?.reason === 'replaced') return;
+    if (reason === 'replaced') return; // skip/playTrack manual, ya se maneja aparte
+
+    if (reason === 'loadFailed') {
+      // El nodo no pudo hacer streaming → re-buscar en todos los nodos
+      const failedTrack = q.currentTrack;
+      const query       = failedTrack?._sourceQuery ?? failedTrack?.info?.title;
+      console.warn(`[Player] loadFailed en "${failedTrack?.info?.title}", re-buscando con query: ${query}`);
+
+      if (query) {
+        try {
+          const freshTrack = await searchTrack(client, query);
+          // Si el nuevo encoded es igual al fallido, no sirve de nada
+          if (freshTrack.encoded !== failedTrack.encoded) {
+            console.log(`[Player] Re-búsqueda exitosa, reproduciendo con nuevo encoded`);
+            const retryItem = { track: freshTrack, requestedBy: q.requestedBy };
+            playNext(client, guildId, retryItem);
+            return;
+          }
+        } catch (e) {
+          console.error(`[Player] Re-búsqueda fallida: ${e.message}`);
+        }
+      }
+      q.textChannel?.send(`No se pudo reproducir: **${failedTrack?.info?.title ?? 'track desconocido'}** (fallo de carga en todos los nodos). Pasando al siguiente.`).catch(() => {});
+    }
+
     playNext(client, guildId);
   });
 
@@ -309,8 +345,7 @@ async function play(client, message, content) {
   const loadingMsg = await message.channel.send('Buscando cancion...');
 
   try {
-    const node  = getNode(client);
-    const track = await searchTrack(node, query);
+    const track = await searchTrack(client, query);
 
     console.log(`[play] Track encontrado: ${track.info?.title}`);
 
