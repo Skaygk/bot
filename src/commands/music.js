@@ -1,6 +1,10 @@
 /**
- * music.js — Módulo de música con Lavalink + Shoukaku
+ * music.js — Módulo de música con Lavalink + Shoukaku v4
  * Requiere que client.shoukaku esté inicializado en index.js
+ *
+ * API correcta de Shoukaku v4:
+ *   - joinVoiceChannel()  → en client.shoukaku, NO en el nodo
+ *   - rest.resolve()      → en node O en player.node después de conectar
  */
 
 const { EmbedBuilder } = require('discord.js');
@@ -12,41 +16,37 @@ function getQueue(client, guildId) {
       player: null,
       tracks: [],
       playing: false,
-      volume: 100,
     });
   }
   return client.musicQueues.get(guildId);
 }
 
-// ─── Helper: obtener nodo Lavalink disponible ────────────────────────────────
+// ─── Helper: obtener nodo disponible ────────────────────────────────────────
 function getNode(client) {
   const node = client.shoukaku.getIdealNode();
   if (!node) throw new Error('No hay nodos Lavalink disponibles en este momento.');
   return node;
 }
 
-// ─── Helper: buscar track en Lavalink ───────────────────────────────────────
+// ─── Helper: buscar track ────────────────────────────────────────────────────
 async function searchTrack(node, query) {
   const isUrl = /^https?:\/\//i.test(query);
-
-  // URL directa → cargar tal cual; texto → buscar en YouTube Music con fallback a YouTube
   const searchQuery = isUrl ? query : `ytmsearch:${query}`;
-  const result = await node.rest.resolve(searchQuery);
 
+  const result = await node.rest.resolve(searchQuery);
   if (!result || !result.data) throw new Error('Sin resultados de Lavalink.');
 
   const { loadType } = result;
 
   if (loadType === 'error' || loadType === 'empty') {
-    // Fallback a búsqueda estándar de YouTube
     if (!isUrl) {
       const fallback = await node.rest.resolve(`ytsearch:${query}`);
       if (!fallback?.data || fallback.loadType === 'empty' || fallback.loadType === 'error') {
-        throw new Error('No se encontró ningún resultado para esa búsqueda.');
+        throw new Error('No se encontró ningún resultado.');
       }
       return fallback.loadType === 'search' ? fallback.data[0] : fallback.data;
     }
-    throw new Error('No se encontró ningún resultado para esa búsqueda.');
+    throw new Error('No se encontró ningún resultado.');
   }
 
   if (loadType === 'search')   return result.data[0];
@@ -65,7 +65,7 @@ function formatDuration(ms) {
   return `${min}:${sec}`;
 }
 
-// ─── Helper: reproducir siguiente track en cola ──────────────────────────────
+// ─── Helper: reproducir siguiente track ─────────────────────────────────────
 async function playNext(client, guildId, textChannel) {
   const queue = getQueue(client, guildId);
 
@@ -96,16 +96,16 @@ async function playNext(client, guildId, textChannel) {
   } catch (err) {
     console.error('[playNext] Error:', err.message);
     queue.playing = false;
-    playNext(client, guildId, textChannel); // intentar siguiente
+    playNext(client, guildId, textChannel);
   }
 }
 
-// ─── Helper: crear player y adjuntar eventos ─────────────────────────────────
+// ─── Helper: crear player con la API correcta de Shoukaku v4 ─────────────────
+// En v4: client.shoukaku.joinVoiceChannel(), NO node.joinChannel()
 async function createPlayer(client, message, voiceChannel) {
-  const node = getNode(client);
   const queue = getQueue(client, message.guild.id);
 
-  const player = await node.joinChannel({
+  const player = await client.shoukaku.joinVoiceChannel({
     guildId: message.guild.id,
     channelId: voiceChannel.id,
     shardId: message.guild.shardId ?? 0,
@@ -119,8 +119,8 @@ async function createPlayer(client, message, voiceChannel) {
   });
 
   player.on('error', (err) => {
-    console.error('[Lavalink Player] Error:', err.message);
-    message.channel.send(` Error en el reproductor: ${err.message}`).catch(() => {});
+    console.error('[Player] Error:', err.message);
+    message.channel.send(`Error en el reproductor: ${err.message}`).catch(() => {});
     playNext(client, message.guild.id, message.channel);
   });
 
@@ -131,13 +131,12 @@ async function createPlayer(client, message, voiceChannel) {
   return player;
 }
 
-// ─── Helper: destruir queue y desconectar ────────────────────────────────────
+// ─── Helper: destruir queue ──────────────────────────────────────────────────
 async function destroyQueue(client, guildId) {
   const queue = client.musicQueues.get(guildId);
   if (!queue) return;
   if (queue.player) {
-    queue.player.connection.disconnect();
-    await queue.player.destroyPlayer().catch(() => {});
+    await client.shoukaku.leaveVoiceChannel(guildId).catch(() => {});
   }
   client.musicQueues.delete(guildId);
 }
@@ -148,30 +147,29 @@ async function destroyQueue(client, guildId) {
 
 async function join(client, message) {
   const voiceChannel = message.member?.voice?.channel;
-  if (!voiceChannel) return message.channel.send(' No estás en un canal de voz.');
+  if (!voiceChannel) return message.channel.send('No estás en un canal de voz.');
 
   const queue = getQueue(client, message.guild.id);
   if (queue.player) return message.channel.send('Ya estoy en un canal de voz.');
 
   try {
     await createPlayer(client, message, voiceChannel);
-    message.channel.send(` Me uní a **${voiceChannel.name}**.`);
+    message.channel.send(`Me uní a **${voiceChannel.name}**.`);
   } catch (err) {
     console.error('[join] Error:', err.message);
-    message.channel.send(` No pude unirme: ${err.message}`);
+    message.channel.send(`No pude unirme: ${err.message}`);
   }
 }
 
 async function play(client, message, content) {
   const voiceChannel = message.member?.voice?.channel;
-  if (!voiceChannel) return message.channel.send(' No estás en un canal de voz.');
+  if (!voiceChannel) return message.channel.send('No estás en un canal de voz.');
 
   const query = content.replace(/^play\s+/i, '').trim();
-  if (!query) return message.channel.send('Especifica una canción. Uso: `,play <nombre o URL>`');
+  if (!query) return message.channel.send('Uso: `,play <nombre o URL>`');
 
   const queue = getQueue(client, message.guild.id);
 
-  // Unirse al canal si no hay player activo
   if (!queue.player) {
     try {
       await createPlayer(client, message, voiceChannel);
@@ -181,7 +179,7 @@ async function play(client, message, content) {
     }
   }
 
-  const loadingMsg = await message.channel.send('🔍 Buscando canción...');
+  const loadingMsg = await message.channel.send('Buscando canción...');
 
   try {
     const node  = getNode(client);
@@ -196,47 +194,43 @@ async function play(client, message, content) {
     await loadingMsg.delete().catch(() => {});
 
     if (queue.playing) {
-      // Ya hay algo sonando → agregar a cola
       const embed = new EmbedBuilder()
         .setColor(0x5865f2)
         .setTitle('Agregado a la cola')
         .setDescription(`**[${title}${author ? ` — ${author}` : ''}](${uri})**`)
         .addFields(
           { name: 'Duración', value: duration, inline: true },
-          { name: 'Posición en cola', value: `#${queue.tracks.length}`, inline: true },
+          { name: 'Posición', value: `#${queue.tracks.length}`, inline: true },
         )
         .setFooter({ text: `Solicitado por ${message.author.tag}` })
         .setTimestamp();
       message.channel.send({ embeds: [embed] });
     } else {
-      // Nada sonando → reproducir de inmediato
       playNext(client, message.guild.id, message.channel);
     }
   } catch (err) {
     console.error('[play] Error:', err.message);
     await loadingMsg.delete().catch(() => {});
-    message.channel.send(` No pude reproducir esa canción: ${err.message}`);
+    message.channel.send(`No pude reproducir esa canción: ${err.message}`);
   }
 }
 
 async function pause(client, message) {
   const queue = getQueue(client, message.guild.id);
   if (!queue.player || !queue.playing) {
-    return message.channel.send(' No hay nada reproduciéndose.');
+    return message.channel.send('No hay nada reproduciéndose.');
   }
   await queue.player.setPaused(true);
   queue.playing = false;
-  message.channel.send('⏸ Canción pausada.');
+  message.channel.send('Canción pausada.');
 }
 
 async function resume(client, message) {
   const queue = getQueue(client, message.guild.id);
-  if (!queue.player) {
-    return message.channel.send(' No hay nada pausado.');
-  }
+  if (!queue.player) return message.channel.send('No hay nada pausado.');
   await queue.player.setPaused(false);
   queue.playing = true;
-  message.channel.send(' Canción reanudada.');
+  message.channel.send('Canción reanudada.');
 }
 
 async function stop(client, message) {
@@ -250,10 +244,10 @@ async function stop(client, message) {
 async function skip(client, message) {
   const queue = getQueue(client, message.guild.id);
   if (!queue.player || !queue.playing) {
-    return message.channel.send(' No hay nada reproduciéndose.');
+    return message.channel.send('No hay nada reproduciéndose.');
   }
-  await queue.player.stopTrack(); // dispara evento 'end' → playNext automático
-  message.channel.send(' Canción saltada.');
+  await queue.player.stopTrack();
+  message.channel.send('Canción saltada.');
 }
 
 function showQueue(client, message) {
@@ -271,7 +265,7 @@ function showQueue(client, message) {
 
   const embed = new EmbedBuilder()
     .setColor(0x1db954)
-    .setTitle(' Cola de reproducción')
+    .setTitle('Cola de reproducción')
     .setDescription(list + (queue.tracks.length > 10 ? `\n...y ${queue.tracks.length - 10} más.` : ''))
     .setTimestamp();
 
