@@ -43,14 +43,12 @@ async function searchAndGetUrl(query) {
   return new Promise((resolve, reject) => {
   const args = [
   target,
-  '-f', 'bestaudio/best',
-  '--get-url',
+  '-g',                    
   '--get-title',
   '--no-playlist',
   '--no-warnings',
   '--no-check-certificates',
-  '--prefer-free-formats',
-  '--audio-quality', '0',
+  '-f', 'worstaudio/worst[ext=webm]/bestaudio/best',
 ];
 
     if (fs.existsSync(COOKIES_PATH)) {
