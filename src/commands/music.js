@@ -6,11 +6,10 @@ const {
   VoiceConnectionStatus,
   entersState,
 } = require('@discordjs/voice');
-const ytdl = require('ytdl-core');
+const ytdl = require('@distube/ytdl-core');
 const yts  = require('yt-search');
 const { EmbedBuilder } = require('discord.js');
 
-// Returns or creates a queue entry for this guild
 function getQueue(client, guildId) {
   if (!client.musicQueues.has(guildId)) {
     client.musicQueues.set(guildId, {
@@ -22,7 +21,6 @@ function getQueue(client, guildId) {
   return client.musicQueues.get(guildId);
 }
 
-// ,join
 async function join(client, message) {
   const voiceChannel = message.member.voice.channel;
   if (!voiceChannel) return message.channel.send('❌ Debes estar en un canal de voz.');
@@ -56,7 +54,6 @@ async function join(client, message) {
   message.channel.send(`✅ Me uní a **${voiceChannel.name}**.`);
 }
 
-// ,play <song name or URL>
 async function play(client, message, content) {
   const voiceChannel = message.member.voice.channel;
   if (!voiceChannel) return message.channel.send('❌ Debes estar en un canal de voz.');
@@ -66,7 +63,6 @@ async function play(client, message, content) {
 
   const queue = getQueue(client, message.guild.id);
 
-  // Auto-join if not connected
   if (!queue.connection) {
     const connection = joinVoiceChannel({
       channelId: voiceChannel.id,
@@ -79,7 +75,6 @@ async function play(client, message, content) {
   let url = query;
   let songTitle = query;
 
-  // Search by name if not a URL
   if (!ytdl.validateURL(query)) {
     const results = await yts(query);
     const video = results.videos[0];
@@ -93,7 +88,6 @@ async function play(client, message, content) {
     } catch (_) {}
   }
 
-  // Create player if needed
   if (!queue.player) {
     queue.player = createAudioPlayer();
     queue.connection.subscribe(queue.player);
@@ -134,7 +128,6 @@ async function play(client, message, content) {
   }
 }
 
-// ,pause
 async function pause(client, message) {
   const queue = getQueue(client, message.guild.id);
   if (!queue.player || !queue.playing) {
@@ -144,7 +137,6 @@ async function pause(client, message) {
   message.channel.send('⏸ Música pausada.');
 }
 
-// ,resume / ,r
 async function resume(client, message) {
   const queue = getQueue(client, message.guild.id);
   if (!queue.player) {
