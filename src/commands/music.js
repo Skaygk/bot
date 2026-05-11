@@ -13,12 +13,13 @@ const emptyChannelTimers = new Map(); // guildId -> Timeout (VC vacío 1 min)
 function getQueue(client, guildId) {
   if (!client.musicQueues.has(guildId)) {
     client.musicQueues.set(guildId, {
-      player:      null,
-      tracks:      [],
-      playing:     false,
-      volume:      100,
+      player:       null,
+      tracks:       [],
+      playing:      false,
+      volume:       100,
       currentTrack: null,
-      requestedBy: null, // userId del que pidió la canción actual
+      requestedBy:  null,  // userId del que pidio la cancion actual
+      textChannel:  null,  // canal de texto donde enviar mensajes
     });
   }
   return client.musicQueues.get(guildId);
@@ -31,32 +32,65 @@ function getNode(client) {
   return node;
 }
 
-// ─── Helper: buscar track en Lavalink ────────────────────────────────────────
-async function searchTrack(node, query) {
-  const isUrl = /^https?:\/\//i.test(query);
-  const searchQuery = isUrl ? query : `ytmsearch:${query}`;
-  const result = await node.rest.resolve(searchQuery);
+// ─── Helper: detectar tipo de URL ────────────────────────────────────────────
+function isYouTubeUrl(query) {
+  return /^https?:\/\/(www\.)?(youtube\.com|youtu\.be)\//i.test(query);
+}
 
-  if (!result || !result.data) throw new Error('Sin resultados de Lavalink.');
+function isAnyUrl(query) {
+  return /^https?:\/\//i.test(query);
+}
 
+// ─── Helper: extraer primer track de un resultado ────────────────────────────
+function extractTrack(result) {
+  if (!result || !result.data) return null;
   const { loadType } = result;
+  if (loadType === 'error' || loadType === 'empty') return null;
+  if (loadType === 'search')   return result.data[0]          ?? null;
+  if (loadType === 'track')    return result.data              ?? null;
+  if (loadType === 'playlist') return result.data.tracks?.[0] ?? null;
+  return null;
+}
 
-  if (loadType === 'error' || loadType === 'empty') {
-    if (!isUrl) {
-      const fallback = await node.rest.resolve(`ytsearch:${query}`);
-      if (!fallback?.data || fallback.loadType === 'empty' || fallback.loadType === 'error') {
-        throw new Error('No se encontró ningún resultado para esa búsqueda.');
-      }
-      return fallback.loadType === 'search' ? fallback.data[0] : fallback.data;
+// ─── Helper: buscar track en Lavalink ────────────────────────────────────────
+// Orden de intentos:
+//   URL de YouTube → directo (el nodo lo resuelve si tiene el plugin)
+//   URL generica   → directo
+//   Texto          → ytmsearch → ytsearch → spsearch → error
+async function searchTrack(node, query) {
+  const ytUrl      = isYouTubeUrl(query);
+  const genericUrl = !ytUrl && isAnyUrl(query);
+
+  // Caso 1: URL de YouTube u otra URL directa
+  if (ytUrl || genericUrl) {
+    const result = await node.rest.resolve(query);
+    const track  = extractTrack(result);
+    if (track) return track;
+
+    // Si el nodo rechazo la URL de YouTube, intentar como busqueda de texto
+    if (ytUrl) {
+      const retry = await node.rest.resolve(`ytsearch:${query}`).catch(() => null);
+      const t2    = retry ? extractTrack(retry) : null;
+      if (t2) return t2;
     }
-    throw new Error('No se encontró ningún resultado para esa búsqueda.');
+
+    throw new Error('No se pudo cargar ese link. El nodo puede no soportar ese tipo de URL.');
   }
 
-  if (loadType === 'search')   return result.data[0];
-  if (loadType === 'track')    return result.data;
-  if (loadType === 'playlist') return result.data.tracks[0];
+  // Caso 2: busqueda por texto con multiples fuentes como fallback
+  const r1 = await node.rest.resolve(`ytmsearch:${query}`).catch(() => null);
+  const t1 = r1 ? extractTrack(r1) : null;
+  if (t1) return t1;
 
-  throw new Error('Tipo de resultado desconocido.');
+  const r2 = await node.rest.resolve(`ytsearch:${query}`).catch(() => null);
+  const t2 = r2 ? extractTrack(r2) : null;
+  if (t2) return t2;
+
+  const r3 = await node.rest.resolve(`spsearch:${query}`).catch(() => null);
+  const t3 = r3 ? extractTrack(r3) : null;
+  if (t3) return t3;
+
+  throw new Error('No se encontro ningun resultado para esa busqueda.');
 }
 
 // ─── Helper: formatear duración ms → mm:ss ───────────────────────────────────
@@ -141,11 +175,15 @@ async function playNext(client, guildId, textChannel) {
 
 // ─── Helper: crear player y adjuntar eventos ─────────────────────────────────
 async function createPlayer(client, message, voiceChannel) {
-  const queue = getQueue(client, message.guild.id);
+  const guildId = message.guild.id;
+  const queue   = getQueue(client, guildId);
 
-  // Shoukaku v4: joinVoiceChannel está en client.shoukaku, no en el nodo
+  // Guardar el canal de texto para usarlo en eventos asincrónicos
+  queue.textChannel = message.channel;
+
+  // Shoukaku v4: joinVoiceChannel esta en client.shoukaku, no en el nodo
   const player = await client.shoukaku.joinVoiceChannel({
-    guildId:   message.guild.id,
+    guildId:   guildId,
     channelId: voiceChannel.id,
     shardId:   message.guild.shardId ?? 0,
     deaf:      true,
@@ -154,19 +192,23 @@ async function createPlayer(client, message, voiceChannel) {
   queue.player = player;
 
   player.on('end', () => {
-    playNext(client, message.guild.id, message.channel);
+    const q = client.musicQueues.get(guildId);
+    if (q?.textChannel) playNext(client, guildId, q.textChannel);
   });
 
   player.on('error', (err) => {
     console.error('[Lavalink Player] Error:', err.message);
-    message.channel.send(`Error en el reproductor: ${err.message}`).catch(() => {});
-    playNext(client, message.guild.id, message.channel);
+    const q = client.musicQueues.get(guildId);
+    if (q?.textChannel) {
+      q.textChannel.send(`Error en el reproductor: ${err.message}`).catch(() => {});
+      playNext(client, guildId, q.textChannel);
+    }
   });
 
   player.on('close', () => {
-    clearInactivityTimer(message.guild.id);
-    clearEmptyChannelTimer(message.guild.id);
-    client.musicQueues.delete(message.guild.id);
+    clearInactivityTimer(guildId);
+    clearEmptyChannelTimer(guildId);
+    client.musicQueues.delete(guildId);
   });
 
   return player;
