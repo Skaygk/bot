@@ -9,13 +9,12 @@ const {
 const { EmbedBuilder } = require('discord.js');
 const playdl = require('play-dl');
 
-// ─── Inicializar SoundCloud (obtiene client_id automaticamente) ──────────────
+// ─── Inicializar SoundCloud ──────────────────────────────────────────────────
 (async () => {
   try {
-    await playdl.getFreeClientID().then((id) => {
-      playdl.setToken({ soundcloud: { client_id: id } });
-      console.log('[play-dl] SoundCloud client_id configurado:', id);
-    });
+    const id = await playdl.getFreeClientID();
+    await playdl.setToken({ soundcloud: { client_id: id } });
+    console.log('[play-dl] SoundCloud client_id configurado:', id);
   } catch (e) {
     console.warn('[play-dl] Error al inicializar SoundCloud:', e.message);
   }
@@ -37,8 +36,9 @@ async function searchSoundCloud(query) {
   const isUrl = query.startsWith('http');
 
   if (isUrl) {
+    // URL directa de soundcloud.com
     const info = await playdl.soundcloud(query);
-    return { title: info.name, url: info.url };
+    return { title: info.name, url: info.permalink };
   }
 
   const results = await playdl.search(query, {
@@ -47,7 +47,16 @@ async function searchSoundCloud(query) {
   });
 
   if (!results || results.length === 0) throw new Error('Sin resultados');
-  return { title: results[0].name, url: results[0].url };
+
+  const track = results[0];
+  console.log('[sc] Track permalink:', track.permalink);
+  console.log('[sc] Track url:', track.url);
+
+  // Usar permalink (URL publica de soundcloud.com) en vez de la URL de API interna
+  const permalink = track.permalink;
+  if (!permalink) throw new Error('No se pudo obtener URL del track');
+
+  return { title: track.name, url: permalink };
 }
 
 // ─── Comandos ────────────────────────────────────────────────────────────────
@@ -118,7 +127,7 @@ async function play(client, message, content) {
     const { title, url } = await searchSoundCloud(query);
 
     console.log('[play] Titulo:', title);
-    console.log('[play] URL:', url);
+    console.log('[play] URL final:', url);
 
     const stream = await playdl.stream(url);
 
