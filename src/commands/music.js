@@ -7,22 +7,7 @@ const {
   entersState,
 } = require('@discordjs/voice');
 const { EmbedBuilder } = require('discord.js');
-const { spawn } = require('child_process');
-const path = require('path');
-const fs = require('fs');
-const ffmpegStatic = require('ffmpeg-static');
-
-// ─── Cookies desde variable de entorno ──────────────────────────────────────
-const COOKIES_PATH = path.join('/tmp', 'cookies.txt');
-if (process.env.YOUTUBE_COOKIES) {
-  fs.writeFileSync(COOKIES_PATH, process.env.YOUTUBE_COOKIES);
-  console.log('[cookies] Archivo de cookies creado en:', COOKIES_PATH);
-} else {
-  console.warn('[cookies] No se encontro la variable YOUTUBE_COOKIES.');
-}
-
-// ─── yt-dlp ─────────────────────────────────────────────────────────────────
-const YTDLP_PATH = '/usr/local/bin/yt-dlp';
+const playdl = require('play-dl');
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 function getQueue(client, guildId) {
@@ -34,95 +19,6 @@ function getQueue(client, guildId) {
     });
   }
   return client.musicQueues.get(guildId);
-}
-
-// Intenta obtener titulo+url probando multiples selectores de formato
-async function searchAndGetUrl(query) {
-  const isUrl = query.startsWith('http');
-  const target = isUrl ? query : `ytsearch1:${query}`;
-
-  // Lista de selectores a probar en orden
-  const formatSelectors = [
-    'bestaudio[ext=webm]',
-    'bestaudio[ext=m4a]',
-    'bestaudio',
-    '251',   // opus webm comun en YouTube
-    '140',   // m4a comun en YouTube
-    'worst', // ultimo recurso, cualquier formato
-  ];
-
-  const baseArgs = [
-    target,
-    '--no-playlist',
-    '--no-warnings',
-    '--no-check-certificates',
-    '--extractor-retries', '3',
-  ];
-
-  if (fs.existsSync(COOKIES_PATH)) baseArgs.push('--cookies', COOKIES_PATH);
-
-  for (const fmt of formatSelectors) {
-    try {
-      const result = await tryFormat(target, fmt, baseArgs);
-      console.log(`[yt-dlp] Formato exitoso: ${fmt}`);
-      return result;
-    } catch (e) {
-      console.warn(`[yt-dlp] Formato "${fmt}" fallo, probando siguiente...`);
-    }
-  }
-
-  throw new Error('Ningún formato disponible para este video.');
-}
-
-function tryFormat(target, fmt, baseArgs) {
-  return new Promise((resolve, reject) => {
-    const args = [
-      ...baseArgs,
-      '-f', fmt,
-      '--print', 'title',
-      '--print', 'url',
-    ];
-
-    const proc = spawn(YTDLP_PATH, args);
-    let stdout = '';
-    let stderr = '';
-
-    proc.stdout.on('data', (d) => { stdout += d.toString(); });
-    proc.stderr.on('data', (d) => { stderr += d.toString(); });
-
-    proc.on('close', (code) => {
-      if (code !== 0) return reject(new Error(stderr));
-      const lines = stdout.trim().split('\n').filter(Boolean);
-      if (lines.length < 2) return reject(new Error('Sin resultados'));
-      resolve({ title: lines[0], url: lines[lines.length - 1] });
-    });
-
-    proc.on('error', reject);
-  });
-}
-
-function getStream(url) {
-  return new Promise((resolve, reject) => {
-    const args = [
-      '-reconnect', '1',
-      '-reconnect_streamed', '1',
-      '-reconnect_delay_max', '5',
-      '-i', url,
-      '-analyzeduration', '0',
-      '-loglevel', '0',
-      '-f', 's16le',
-      '-ar', '48000',
-      '-ac', '2',
-      'pipe:1',
-    ];
-
-    const proc = spawn(ffmpegStatic, args);
-    proc.on('error', (err) => {
-      console.error('[ffmpeg] Error:', err);
-      reject(err);
-    });
-    resolve(proc.stdout);
-  });
 }
 
 // ─── Comandos ────────────────────────────────────────────────────────────────
@@ -190,12 +86,37 @@ async function play(client, message, content) {
   const loadingMsg = await message.channel.send('Buscando cancion...');
 
   try {
-    const { title, url } = await searchAndGetUrl(query);
-    console.log('[play] Titulo:', title);
-    console.log('[play] URL obtenida:', url.substring(0, 80) + '...');
+    // Buscar por nombre o URL directa
+    let videoUrl;
+    let title;
 
-    const stream = await getStream(url);
-    const resource = createAudioResource(stream, { inputType: 'raw' });
+    const isUrl = query.startsWith('http');
+
+    if (isUrl) {
+      // Es una URL directa de YouTube
+      const info = await playdl.video_info(query);
+      title = info.video_details.title;
+      videoUrl = query;
+    } else {
+      // Buscar por nombre
+      const results = await playdl.search(query, { limit: 1 });
+      if (!results || results.length === 0) {
+        await loadingMsg.delete().catch(() => {});
+        return message.channel.send('No encontre resultados para esa busqueda.');
+      }
+      title = results[0].title;
+      videoUrl = results[0].url;
+    }
+
+    console.log('[play] Titulo:', title);
+    console.log('[play] URL:', videoUrl);
+
+    // Obtener stream directo con play-dl
+    const stream = await playdl.stream(videoUrl, { quality: 2 });
+
+    const resource = createAudioResource(stream.stream, {
+      inputType: stream.type,
+    });
 
     if (!queue.player) {
       queue.player = createAudioPlayer();
