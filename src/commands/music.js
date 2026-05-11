@@ -16,18 +16,13 @@ let ytDlp = null;
 
 async function getYtDlp() {
   if (!ytDlp) {
-    ytDlp = new YTDlpWrap();
-    try {
-      await YTDlpWrap.downloadFromGithub();
-      console.log('[yt-dlp] Binario descargado correctamente.');
-    } catch (e) {
-      console.warn('[yt-dlp] No se pudo descargar el binario:', e.message);
-    }
+    // Usa el binario instalado por nixpacks en Railway
+    ytDlp = new YTDlpWrap('/usr/bin/yt-dlp');
+    console.log('[yt-dlp] Usando binario del sistema.');
   }
   return ytDlp;
 }
 
-// Llama esto una vez al arrancar el bot (desde index.js o aquí al cargar el módulo)
 getYtDlp();
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -100,13 +95,13 @@ function getStream(url) {
 async function join(client, message) {
   const voiceChannel = message.member?.voice?.channel;
   if (!voiceChannel) {
-    return message.channel.send('No estás en un canal de voz.');
+    return message.channel.send('❌ No estás en un canal de voz.');
   }
 
   const queue = getQueue(client, message.guild.id);
 
   if (queue.connection) {
-    return message.channel.send('Ya estoy en un canal de voz vro');
+    return message.channel.send('⚠️ Ya estoy en un canal de voz.');
   }
 
   const connection = joinVoiceChannel({
@@ -129,18 +124,18 @@ async function join(client, message) {
     }
   });
 
-  message.channel.send(`Me uní a **${voiceChannel.name}**.`);
+  message.channel.send(` ulu se unio **${voiceChannel.name}**.`);
 }
 
 async function play(client, message, content) {
   const voiceChannel = message.member?.voice?.channel;
   if (!voiceChannel) {
-    return message.channel.send('No estás en un canal de voz wey');
+    return message.channel.send('metete a un vc vro');
   }
 
   const query = content.replace(/^play\s+/i, '').trim();
   if (!query) {
-    return message.channel.send('Especifica una canción. Uso: `,play <nombre o URL>`');
+    return message.channel.send('Especifica una canción asi: `,play <nombre o URL>`');
   }
 
   const queue = getQueue(client, message.guild.id);
@@ -168,7 +163,7 @@ async function play(client, message, content) {
   }
 
   // Mensaje de carga
-  const loadingMsg = await message.channel.send('Buscando canción :p');
+  const loadingMsg = await message.channel.send('🔍 Buscando canción...');
 
   try {
     const { title, url } = await searchAndGetUrl(query);
@@ -211,7 +206,7 @@ async function play(client, message, content) {
   } catch (err) {
     console.error('[play] Error:', err);
     await loadingMsg.delete().catch(() => {});
-    message.channel.send('ulu no pudo reproducir esa canción');
+    message.channel.send('No pude reproducir esa canción. Intenta con otro link o nombre :>');
   }
 }
 
@@ -231,7 +226,7 @@ async function resume(client, message) {
   const queue = getQueue(client, message.guild.id);
 
   if (!queue.player || queue.player.state.status !== AudioPlayerStatus.Paused) {
-    return message.channel.send('No hay nada pausado.');
+    return message.channel.send(' No hay nada pausado.');
   }
 
   queue.player.unpause();
@@ -254,7 +249,7 @@ async function stop(client, message) {
   }
 
   client.musicQueues.delete(message.guild.id);
-  message.channel.send('Reproducción detenida.');
+  message.channel.send(':p salí del canal.');
 }
 
 module.exports = { join, play, pause, resume, stop };
