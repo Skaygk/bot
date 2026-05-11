@@ -3,14 +3,14 @@ const { EmbedBuilder } = require('discord.js');
 // ,ban @user [razon]
 async function ban(client, message, content) {
   if (!message.member.permissions.has('BanMembers')) {
-    return message.channel.send('❌ No tienes permisos para banear.');
+    return message.channel.send(' No tienes permisos para banear.');
   }
   if (!message.guild.members.me.permissions.has('BanMembers')) {
-    return message.channel.send('❌ No tengo permisos para banear.');
+    return message.channel.send('No tengo permisos para banear.');
   }
 
   const target = message.mentions.members.first();
-  if (!target) return message.channel.send('❌ Menciona un usuario. Uso: `,ban @usuario [razón]`');
+  if (!target) return message.channel.send(' Menciona un usuario. Uso: `,ban @usuario [razón]`');
 
   const args = content.split(' ').slice(1);
   const reason = args.slice(1).join(' ') || 'Sin razón especificada';
@@ -30,7 +30,7 @@ async function ban(client, message, content) {
 
     message.channel.send({ embeds: [embed] });
   } catch (err) {
-    message.channel.send('❌ No pude banear a ese usuario.');
+    message.channel.send('No pude banear a ese usuario.');
   }
 }
 
