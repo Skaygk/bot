@@ -24,19 +24,19 @@ function getQueue(client, guildId) {
   return client.musicQueues.get(guildId);
 }
 
-function getNode(client) {
-  const node = client.shoukaku.getIdealNode();
-  if (!node) throw new Error('No hay nodos Lavalink disponibles.');
-  return node;
-}
-
-// Devuelve todos los nodos conectados, el ideal primero
+// Devuelve todos los nodos disponibles, el ideal primero.
+// No filtra por state para evitar falsos negativos entre versiones de Shoukaku.
+// Cada llamada a node.rest.resolve tiene su propio .catch(() => null) como red de seguridad.
 function getAllNodes(client) {
-  const nodes = [...client.shoukaku.nodes.values()].filter(n => n.state === 2); // 2 = CONNECTED
-  if (!nodes.length) throw new Error('No hay nodos Lavalink disponibles.');
+  // getIdealNode() devuelve null si no hay ninguno listo
   const ideal = client.shoukaku.getIdealNode();
-  if (!ideal) return nodes;
-  return [ideal, ...nodes.filter(n => n !== ideal)];
+
+  // Tomar todos los nodos registrados (conectados o no) y poner el ideal primero
+  const all = [...client.shoukaku.nodes.values()];
+  if (!all.length) throw new Error('No hay nodos Lavalink registrados.');
+
+  if (!ideal) return all; // si ninguno es "ideal" intentar todos de igual
+  return [ideal, ...all.filter(n => n !== ideal)];
 }
 
 // ─── Formato duración ─────────────────────────────────────────────────────────
@@ -67,7 +67,8 @@ function extractTrack(result) {
 
 // ─── Buscar track probando todos los nodos disponibles ───────────────────────
 async function searchTrack(client, query) {
-  const nodes      = getAllNodes(client);
+  const nodes = getAllNodes(client);
+  console.log(`[searchTrack] Nodos disponibles: ${nodes.map(n => n.name).join(', ')}`);
   const ytUrl      = isYouTubeUrl(query);
   const genericUrl = !ytUrl && isAnyUrl(query);
 
