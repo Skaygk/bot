@@ -22,12 +22,12 @@ function getQueue(client, guildId) {
 
 async function join(client, message) {
   const voiceChannel = message.member.voice.channel;
-  if (!voiceChannel) return message.channel.send('❌ Debes estar en un canal de voz.');
+  if (!voiceChannel) return message.channel.send('Debes estar en un canal de voz.');
 
   const queue = getQueue(client, message.guild.id);
 
   if (queue.connection) {
-    return message.channel.send('✅ Ya estoy en un canal de voz.');
+    return message.channel.send('Ya estoy en un canal de voz.');
   }
 
   const connection = joinVoiceChannel({
@@ -50,7 +50,7 @@ async function join(client, message) {
     }
   });
 
-  message.channel.send(`✅ Me uní a **${voiceChannel.name}**.`);
+  message.channel.send(`Me uní a **${voiceChannel.name}**.`);
 }
 
 async function play(client, message, content) {
