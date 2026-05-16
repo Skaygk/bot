@@ -5,38 +5,38 @@ const { Shoukaku, Connectors } = require('shoukaku');
 // ─── Nodos Lavalink públicos ─────────────────────────────────────────────────
 const LAVALINK_NODES = [
   {
-    name: 'nexcloud',
-    url:  'n3.nexcloud.in:2026',
-    auth: 'nexcloud',
+    name:   'nexcloud',
+    url:    'n3.nexcloud.in:2026',
+    auth:   'nexcloud',
     secure: false,
   },
   {
-    name: 'jirayu',
-    url:  'lavalink.jirayu.net:13592',
-    auth: 'youshallnotpass',
+    name:   'jirayu',
+    url:    'lavalink.jirayu.net:13592',
+    auth:   'youshallnotpass',
     secure: false,
   },
   {
-    name: 'serenetia',
-    url:  'lavalinkv4.serenetia.com:80',
-    auth: 'https://dsc.gg/ajidevserver',
+    name:   'serenetia',
+    url:    'lavalinkv4.serenetia.com:80',
+    auth:   'https://dsc.gg/ajidevserver',
     secure: false,
   },
   {
-    name: 'vexanode',
-    url:  'omega.vexanode.cloud:2031',
-    auth: 'https://discord.vexanode.cloud',
+    name:   'vexanode',
+    url:    'omega.vexanode.cloud:2031',
+    auth:   'https://discord.vexanode.cloud',
     secure: false,
   },
 ];
 
 const SHOUKAKU_OPTIONS = {
-  moveOnDisconnect:        false,
-  resumable:               false,
-  resumableTimeout:        30,
-  reconnectTries:          3,
-  restTimeout:             10000,
-  voiceConnectionTimeout:  30000, // 30s para establecer conexion de voz (default 15s)
+  moveOnDisconnect:       false,
+  resumable:              false,
+  resumableTimeout:       30,
+  reconnectTries:         3,
+  restTimeout:            10000,
+  voiceConnectionTimeout: 30000,
 };
 
 // ─── Cliente Discord ─────────────────────────────────────────────────────────
@@ -65,22 +65,22 @@ client.shoukaku = new Shoukaku(
 client.shoukaku.on('error', (name, err) => {
   console.error(`[Lavalink:${name}] Error: ${err.message}`);
 });
-
 client.shoukaku.on('ready', (name) => {
   console.log(`[Lavalink:${name}] Nodo conectado correctamente.`);
 });
-
 client.shoukaku.on('disconnect', (name, count) => {
   console.warn(`[Lavalink:${name}] Desconectado. Reconexiones restantes: ${count}`);
 });
 
 // ─── Handlers ────────────────────────────────────────────────────────────────
-const { handleCommand }      = require('./handler');
-const { handleMemberUpdate } = require('./events/memberUpdate');
+const { handleCommand }          = require('./handler');
+const { handleMemberUpdate }     = require('./events/memberUpdate');
 const { handleVoiceStateUpdate } = require('./commands/music');
 
-client.on('ready', () => {
-  console.log(`Bot online como ${client.user.tag}`);
+// FIX: usar 'clientReady' en lugar de 'ready' para evitar el DeprecationWarning
+//      de discord.js v14 (en v15 'ready' dejará de funcionar).
+client.on('clientReady', (readyClient) => {
+  console.log(`Bot online como ${readyClient.user.tag}`);
 });
 
 client.on('messageCreate', async (message) => {
