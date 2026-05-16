@@ -24,18 +24,11 @@ function getQueue(client, guildId) {
   return client.musicQueues.get(guildId);
 }
 
-// Devuelve todos los nodos disponibles, el ideal primero.
-// No filtra por state para evitar falsos negativos entre versiones de Shoukaku.
-// Cada llamada a node.rest.resolve tiene su propio .catch(() => null) como red de seguridad.
 function getAllNodes(client) {
-  // getIdealNode() devuelve null si no hay ninguno listo
   const ideal = client.shoukaku.getIdealNode();
-
-  // Tomar todos los nodos registrados (conectados o no) y poner el ideal primero
-  const all = [...client.shoukaku.nodes.values()];
+  const all   = [...client.shoukaku.nodes.values()];
   if (!all.length) throw new Error('No hay nodos Lavalink registrados.');
-
-  if (!ideal) return all; // si ninguno es "ideal" intentar todos de igual
+  if (!ideal) return all;
   return [ideal, ...all.filter(n => n !== ideal)];
 }
 
@@ -59,15 +52,15 @@ function extractTrack(result) {
   if (!result?.data) return null;
   const { loadType } = result;
   if (loadType === 'error' || loadType === 'empty') return null;
-  if (loadType === 'search')   return result.data[0]           ?? null;
-  if (loadType === 'track')    return result.data               ?? null;
-  if (loadType === 'playlist') return result.data.tracks?.[0]  ?? null;
+  if (loadType === 'search')   return result.data[0]          ?? null;
+  if (loadType === 'track')    return result.data              ?? null;
+  if (loadType === 'playlist') return result.data.tracks?.[0] ?? null;
   return null;
 }
 
 // ─── Buscar track probando todos los nodos disponibles ───────────────────────
 async function searchTrack(client, query) {
-  const nodes = getAllNodes(client);
+  const nodes      = getAllNodes(client);
   console.log(`[searchTrack] Nodos disponibles: ${nodes.map(n => n.name).join(', ')}`);
   const ytUrl      = isYouTubeUrl(query);
   const genericUrl = !ytUrl && isAnyUrl(query);
@@ -82,8 +75,7 @@ async function searchTrack(client, query) {
       const t = r ? extractTrack(r) : null;
       if (t) {
         console.log(`[searchTrack] Encontrado en nodo "${node.name}" con fuente: ${src}`);
-        // Adjuntar el nodo que encontró el track para reproducirlo en ese mismo nodo
-        t._sourceNode = node.name;
+        t._sourceNode  = node.name;
         t._sourceQuery = query;
         return t;
       }
@@ -122,24 +114,44 @@ function startInactivityTimer(client, guildId) {
   inactivityTimers.set(guildId, timer);
 }
 
-// ─── Destruir queue y desconectar ─────────────────────────────────────────────
+// ─── Destruir queue y desconectar ────────────────────────────────────────────
+// FIX: separar "detener player" de "limpiar estado local" para no
+//      llamar a leaveVoiceChannel cuando la sesión ya no existe.
 async function destroyQueue(client, guildId) {
   clearInactivityTimer(guildId);
   clearEmptyChannelTimer(guildId);
+
   const queue = client.musicQueues.get(guildId);
+
+  // Quitar listeners ANTES de stopTrack para evitar que 'end'/'close'
+  // dispare playNext o borre la queue mientras la estamos destruyendo.
   if (queue?.player) {
+    queue.player.removeAllListeners();
     try { await queue.player.stopTrack(); } catch (_) {}
   }
-  // Siempre intentar salir del VC en Shoukaku, aunque no tengamos queue local
+
+  // Salir del canal de voz. Si la sesión ya no existe Shoukaku lanzará,
+  // pero lo ignoramos: el objetivo es limpiar el estado local.
   try { await client.shoukaku.leaveVoiceChannel(guildId); } catch (_) {}
+
   client.musicQueues.delete(guildId);
 }
 
 // ─── Limpiar cualquier conexión residual de Shoukaku para una guild ───────────
+// FIX: también quita listeners del player residual para evitar efectos
+//      secundarios si Shoukaku dispara eventos después de leaveVoiceChannel.
 async function forceCleanup(client, guildId) {
   clearInactivityTimer(guildId);
   clearEmptyChannelTimer(guildId);
+
+  const queue = client.musicQueues.get(guildId);
+  if (queue?.player) {
+    queue.player.removeAllListeners();
+  }
+
   client.musicQueues.delete(guildId);
+
+  // Intentar salir del VC. Si ya no hay sesión, Shoukaku lanzará → lo ignoramos.
   try { await client.shoukaku.leaveVoiceChannel(guildId); } catch (_) {}
 }
 
@@ -148,7 +160,6 @@ async function playNext(client, guildId, _retryItem) {
   const queue = client.musicQueues.get(guildId);
   if (!queue) return;
 
-  // _retryItem: item que falló con loadFailed y se reencola para reintento
   const item = _retryItem ?? (queue.tracks.length ? queue.tracks.shift() : null);
   if (!item) {
     queue.playing      = false;
@@ -158,7 +169,6 @@ async function playNext(client, guildId, _retryItem) {
     return;
   }
 
-  // Cancelar timer de inactividad en cuanto hay algo para reproducir
   clearInactivityTimer(guildId);
 
   const title    = item.track.info?.title  ?? 'Desconocido';
@@ -188,36 +198,22 @@ async function playNext(client, guildId, _retryItem) {
   }
 }
 
-// ─── Crear player ─────────────────────────────────────────────────────────────
-async function createPlayer(client, guildId, voiceChannelId, shardId, textChannel) {
-  const queue = getQueue(client, guildId);
-  queue.textChannel = textChannel;
+// ─── Registrar listeners del player ──────────────────────────────────────────
+// FIX: extraído a función propia para poder re-registrar después de un
+//      reconnect sin duplicar listeners.
+function attachPlayerListeners(client, guildId, player) {
+  // Limpiar listeners previos por si acaso
+  player.removeAllListeners();
 
-  console.log(`[createPlayer] Conectando a canal ${voiceChannelId} en guild ${guildId}`);
-
-  // Limpiar cualquier conexión residual antes de crear una nueva
-  try { await client.shoukaku.leaveVoiceChannel(guildId); } catch (_) {}
-
-  const player = await client.shoukaku.joinVoiceChannel({
-    guildId,
-    channelId: voiceChannelId,
-    shardId:   shardId ?? 0,
-    deaf:      true,
-  });
-
-  queue.player = player;
-
-  // Shoukaku v4 emite 'end' en el player cuando termina un track
   player.on('end', async (data) => {
     const reason = data?.reason ?? '';
     console.log(`[Player] Track terminado en guild ${guildId} reason=${reason}`);
     const q = client.musicQueues.get(guildId);
     if (!q) return;
     q.playing = false;
-    if (reason === 'replaced') return; // skip/playTrack manual, ya se maneja aparte
+    if (reason === 'replaced') return;
 
     if (reason === 'loadFailed') {
-      // El nodo no pudo hacer streaming → re-buscar en todos los nodos
       const failedTrack = q.currentTrack;
       const query       = failedTrack?._sourceQuery ?? failedTrack?.info?.title;
       console.warn(`[Player] loadFailed en "${failedTrack?.info?.title}", re-buscando con query: ${query}`);
@@ -225,18 +221,18 @@ async function createPlayer(client, guildId, voiceChannelId, shardId, textChanne
       if (query) {
         try {
           const freshTrack = await searchTrack(client, query);
-          // Si el nuevo encoded es igual al fallido, no sirve de nada
           if (freshTrack.encoded !== failedTrack.encoded) {
-            console.log(`[Player] Re-búsqueda exitosa, reproduciendo con nuevo encoded`);
-            const retryItem = { track: freshTrack, requestedBy: q.requestedBy };
-            playNext(client, guildId, retryItem);
+            console.log('[Player] Re-búsqueda exitosa, reproduciendo con nuevo encoded');
+            playNext(client, guildId, { track: freshTrack, requestedBy: q.requestedBy });
             return;
           }
         } catch (e) {
           console.error(`[Player] Re-búsqueda fallida: ${e.message}`);
         }
       }
-      q.textChannel?.send(`No se pudo reproducir: **${failedTrack?.info?.title ?? 'track desconocido'}** (fallo de carga en todos los nodos). Pasando al siguiente.`).catch(() => {});
+      q.textChannel?.send(
+        `No se pudo reproducir: **${failedTrack?.info?.title ?? 'track desconocido'}** (fallo de carga en todos los nodos). Pasando al siguiente.`
+      ).catch(() => {});
     }
 
     playNext(client, guildId);
@@ -251,18 +247,42 @@ async function createPlayer(client, guildId, voiceChannelId, shardId, textChanne
     playNext(client, guildId);
   });
 
+  // FIX: en 'close' NO borramos la queue directamente porque puede dispararse
+  //      durante un leaveVoiceChannel legítimo que ya está manejando destroyQueue.
+  //      Solo limpiamos timers y marcamos el player como null si la queue existe.
   player.on('close', () => {
     console.log(`[Player] Cerrado en guild ${guildId}`);
     clearInactivityTimer(guildId);
     clearEmptyChannelTimer(guildId);
-    client.musicQueues.delete(guildId);
+    const q = client.musicQueues.get(guildId);
+    if (q) {
+      q.player  = null;
+      q.playing = false;
+    }
   });
 
-  // Algunos builds de Shoukaku usan 'stuck' cuando el track se congela
   player.on('stuck', () => {
     console.warn(`[Player] Track stuck en guild ${guildId}, saltando...`);
     playNext(client, guildId);
   });
+}
+
+// ─── Crear player ─────────────────────────────────────────────────────────────
+async function createPlayer(client, guildId, voiceChannelId, shardId, textChannel) {
+  const queue = getQueue(client, guildId);
+  queue.textChannel = textChannel;
+
+  console.log(`[createPlayer] Conectando a canal ${voiceChannelId} en guild ${guildId}`);
+
+  const player = await client.shoukaku.joinVoiceChannel({
+    guildId,
+    channelId: voiceChannelId,
+    shardId:   shardId ?? 0,
+    deaf:      true,
+  });
+
+  queue.player = player;
+  attachPlayerListeners(client, guildId, player);
 
   console.log(`[createPlayer] Player listo en guild ${guildId}`);
   return player;
@@ -324,6 +344,8 @@ async function join(client, message) {
   }
 
   try {
+    // FIX: forceCleanup ya no llama leaveVoiceChannel si no hay player activo,
+    //      así que no rompe la sesión antes de joinVoiceChannel.
     await forceCleanup(client, message.guild.id);
     await createPlayer(client, message.guild.id, voiceChannel.id, message.guild.shardId, message.channel);
     message.channel.send(`Me uni a **${voiceChannel.name}**.`);
@@ -341,23 +363,21 @@ async function play(client, message, content) {
   const query = content.replace(/^play\s+/i, '').trim();
   if (!query) return message.channel.send('Especifica una cancion. Uso: `,play <nombre o URL>`');
 
-  // Obtener o crear queue
   let queue = client.musicQueues.get(message.guild.id);
 
+  // FIX: si el player existe pero 'close' ya lo anuló (queue.player === null),
+  //      tratar como si no hubiera player → limpiar y reconectar.
   if (!queue?.player) {
-    // Limpiar cualquier conexión residual de Shoukaku antes de intentar unirse
     await forceCleanup(client, message.guild.id);
     try {
       await createPlayer(client, message.guild.id, voiceChannel.id, message.guild.shardId, message.channel);
       queue = client.musicQueues.get(message.guild.id);
     } catch (err) {
       console.error('[play] Error al unirse:', err.message);
-      // Si falla, limpiar de nuevo para no dejar estado corrupto
       await forceCleanup(client, message.guild.id);
       return message.channel.send(`No pude unirme al canal: ${err.message}`);
     }
   } else {
-    // Verificar que el bot realmente está en un VC; si no, limpiar y reconectar
     const botInVc = message.guild.members.me?.voice?.channelId;
     if (!botInVc) {
       console.warn('[play] Queue existe pero bot no esta en VC, limpiando y reconectando...');
@@ -465,7 +485,7 @@ async function skip(client, message) {
     .setTitle('Votacion para saltar cancion')
     .setDescription(
       `**${message.author.tag}** quiere saltar la cancion actual.\n\n` +
-      `Reacciona con SI para votar a favor.\n` +
+      `Reacciona con ✅ para votar a favor.\n` +
       `Votos necesarios: **${votesNeeded}** de **${humanCount}**\n` +
       `Tiempo: 60 segundos`
     )
